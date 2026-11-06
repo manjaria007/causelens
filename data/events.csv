@@ -1,0 +1,6 @@
+date,type,name,scope,description
+2026-08-18,release,Search ranking tweak v3.9,all,Minor relevance change to on-site search.
+2026-09-02,campaign,Labor Day email blast,channel=email,One-day promotional email.
+2026-09-20,incident,Analytics tag deploy,device=desktop,Tag manager change; rolled back next day.
+2026-10-13,release,Homepage hero refresh,all,New homepage hero imagery and copy.
+2026-10-14,release,Checkout v4.2,all,New payment step with Apple Pay / Google Pay sheet.
