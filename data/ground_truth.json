@@ -1,0 +1,51 @@
+{
+  "seed": 42,
+  "window": {
+    "start": "2026-08-01",
+    "end": "2026-10-31"
+  },
+  "planted_cause": {
+    "event": "Checkout v4.2",
+    "date": "2026-10-14",
+    "affected_segment": {
+      "device": "mobile",
+      "browser": "safari"
+    },
+    "relative_effect_in_segment": -0.25,
+    "true_effect_in_segment_pp": -0.6618,
+    "true_effect_on_overall_conversion_pp": -0.2002
+  },
+  "decoys": [
+    {
+      "event": "Homepage hero refresh",
+      "date": "2026-10-13",
+      "true_effect_pp": 0.0,
+      "why_tempting": "Lands one day before the drop and touches every visitor."
+    }
+  ],
+  "data_quality_traps": [
+    {
+      "date": "2026-09-20",
+      "kind": "tracking_outage",
+      "scope": {
+        "device": "desktop"
+      },
+      "orders_lost_share": 0.6,
+      "correct_reading": "Tracking loss, not a behavioural change."
+    }
+  ],
+  "grading": {
+    "must_identify_event": "Checkout v4.2",
+    "must_localize_to": {
+      "device": "mobile",
+      "browser": "safari"
+    },
+    "must_reject": [
+      "Homepage hero refresh"
+    ],
+    "ci_must_cover": "true_effect_in_segment_pp",
+    "must_flag_data_quality": [
+      "2026-09-20"
+    ]
+  }
+}
