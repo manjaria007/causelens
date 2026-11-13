@@ -55,3 +55,18 @@ For each task, record:
   post main effect. Report uncertainty and checks even when results are inconvenient.
 - Task 6 sample size and duration must come from deterministic functions using
   declared assumptions and observed eligible traffic.
+
+## Task 2: data loading and validation
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 2,
+  subtasks 2.1–2.3), after reading the steering files, requirements and design.
+- Code: `causelens/analytics/loaders.py`, `causelens/analytics/data_quality.py`.
+  Documentation of detector parameters and edge cases: `docs/data-quality.md`.
+- Specification issue: the design lists only "rolling median ± k·MAD". On the simulator
+  that alone gave 1–3 chance flags per seed in small segments, so a binomial sampling-noise
+  floor and a minimum relative deviation were added and documented. A centred window was
+  used so persistent changes (Checkout v4.2) are not flagged as tracking blips.
+- Results: `.venv/bin/python -m pytest -q` passed (49 tests);
+  `.venv/bin/python -m ruff check causelens tests` passed. The 2026-09-20 desktop day is
+  flagged and linked to "Analytics tag deploy" on the reference data and on seeds 1–40.
+- Hook activation in Kiro was not verified.
