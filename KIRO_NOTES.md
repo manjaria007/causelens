@@ -12,8 +12,11 @@ written by other tools to Kiro.
   ground truth are preserved. Tasks 2 through 6 remain unimplemented.
 - The hook uses the current Kiro IDE 1.x / CLI V3 schema documented at
   https://kiro.dev/docs/hooks/. Its matcher selects Python files under causelens/.
-- Hook activation has not been verified in Kiro. Open the repository in Kiro,
-  confirm the hook is listed, and save a causelens Python file to verify execution.
+- Kiro Web does not support File Save triggers; the existing PostFileSave hook is
+  for the IDE / CLI V3. In Web, use an Agent Stop hook (JSON trigger: Stop) to run
+  pytest after each agent turn. See https://kiro.dev/docs/hooks/types/.
+- Hook activation has not been verified in the user's Kiro session. Confirm an
+  actual automatic execution record; manually running pytest does not verify a hook.
 - The baseline contains no executable tests. A no-tests pytest result must not be
   recorded as a successful Task 2 run.
 - Setup verification: created a project-local .venv and installed requirements.txt.
