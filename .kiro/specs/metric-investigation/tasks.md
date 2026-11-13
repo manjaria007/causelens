@@ -4,10 +4,10 @@
   - `causelens/sim/generate.py` writes `metrics_daily.csv`, `events.csv`, `ground_truth.json`
   - _Requirements: 10.1_
 
-- [ ] 2. Data loading and validation
-  - [ ] 2.1 Typed loaders for metrics and events; reject invalid rows with clear errors
-  - [ ] 2.2 `check_data_quality` (rolling median ± k·MAD), link flags to incident events
-  - [ ] 2.3 Property test: injected order loss on one segment-day gets flagged
+- [x] 2. Data loading and validation
+  - [x] 2.1 Typed loaders for metrics and events; reject invalid rows with clear errors
+  - [x] 2.2 `check_data_quality` (rolling median ± k·MAD), link flags to incident events
+  - [x] 2.3 Property test: injected order loss on one segment-day gets flagged
   - _Requirements: 1.1–1.5_
 
 - [ ] 3. Confirm change and change point

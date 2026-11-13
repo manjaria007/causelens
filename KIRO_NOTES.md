@@ -55,3 +55,30 @@ For each task, record:
   post main effect. Report uncertainty and checks even when results are inconvenient.
 - Task 6 sample size and duration must come from deterministic functions using
   declared assumptions and observed eligible traffic.
+
+## Task 2: data loading and validation
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 2,
+  subtasks 2.1-2.3), after reading the steering files, requirements and design.
+- Code: `causelens/analytics/loaders.py`, `causelens/analytics/data_quality.py`.
+  Documentation of detector parameters and edge cases: `docs/data-quality.md`.
+- Specification issue: the design lists only "rolling median +/- k*MAD". On the simulator
+  that alone gave 1-3 chance flags per seed in small segments, so a binomial sampling-noise
+  floor and a minimum relative deviation were added and documented. A centred window was
+  used so persistent changes (Checkout v4.2) are not flagged as tracking blips, which holds
+  only where the baseline is complete (see the limitation in the docs).
+- Review round (PR #2, review supplied by the user): fixed seven findings - property-test
+  fixtures that could not guarantee their assertions (now bounded fixtures plus explicit
+  statistical error rates), count overflow, CSV records with extra or missing fields, repeated
+  index labels, incident links to segments with no shared traffic, parameter relationships and
+  zero scales, and unreported volume-only anomalies. Each has a regression test. The
+  end-of-series limitation is now exposed in the flags, report and exclusion statement.
+  Raising the sessions threshold to 0.40 was a calibration against observed weekday swings
+  (up to 0.30 over 100 seeds), documented as such.
+- Second review round: counts are now validated exactly from the original value (no float
+  rounding, complex rejected); the CSV reader is strict and rejects records spanning lines so an
+  unclosed quote cannot swallow later events; incident links now state whether overlap was
+  observed on the flagged day or only historical. Each has a regression test.
+- Results: `.venv/bin/python -m pytest -q` passed (129 tests);
+  `.venv/bin/python -m ruff check causelens tests` passed.
+- Hook activation in Kiro was not verified.
