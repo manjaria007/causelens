@@ -5,6 +5,7 @@ written by other tools to Kiro.
 
 ## Preparation
 
+- Repository setup and the synthetic data generator were prepared with other tools before the Kiro build; Kiro implementation began with Task 2.
 - Codex prepared this setup branch: documentation, generated-data/cache ignores,
   removal of the src placeholder, and the pytest-on-save hook configuration.
 - Existing steering, requirements, design, task checklist, simulator, events, and
