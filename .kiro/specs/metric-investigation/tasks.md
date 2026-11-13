@@ -10,10 +10,10 @@
   - [x] 2.3 Property test: injected order loss on one segment-day gets flagged
   - _Requirements: 1.1–1.5_
 
-- [ ] 3. Confirm change and change point
-  - [ ] 3.1 `confirm_change` with bootstrap CI over days
-  - [ ] 3.2 `detect_change_point` with weekday deseasonalization and plausible-date set
-  - [ ] 3.3 Match plausible dates to event log candidates
+- [x] 3. Confirm change and change point
+  - [x] 3.1 `confirm_change` with bootstrap CI over days
+  - [x] 3.2 `detect_change_point` with weekday deseasonalization and plausible-date set
+  - [x] 3.3 Match plausible dates to event log candidates
   - _Requirements: 2.1–2.3, 3.1–3.3_
 
 - [ ] 4. Localization

@@ -86,3 +86,27 @@ For each task, record:
 - Results: `.venv/bin/python -m pytest -q` passed (129 tests);
   `.venv/bin/python -m ruff check causelens tests` passed.
 - Hook activation in Kiro was not verified.
+
+## Task 3: confirm the change and locate it
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 3,
+  subtasks 3.1-3.3) after reading the steering files, requirements, design and task plan.
+- Code: `causelens/analytics/series.py` (daily series, Task 2 exclusions and their disclosure),
+  `confirm.py` (`confirm_change`), `changepoint.py` (`detect_change_point`,
+  `match_event_candidates`). Methods, parameters, measured behaviour and limits are in
+  `docs/change-analysis.md`.
+- How the specification shaped the work: the scientist rules drove the result shapes (intervals and
+  sample sizes on every estimate, effect size beside every p-value, assumptions listed, no causal
+  wording) and the explicit insufficient-data and stop-investigation paths (Requirement 2.3).
+- Specification interpretations: (1) Requirement 3.3 says events "within the plausible range"; the
+  likelihood-ratio set alone excluded an event one day before the earliest plausible date, so a
+  documented `lead_days` look-back (default 3) lists events shortly before the range, tagged
+  `precedes_range_within_lead`, with `lead_days=0` giving the strict reading. (2) The design's
+  "binary segmentation / CUSUM" is implemented as an exhaustive single-split search, equivalent for
+  one change point; multiple change points are not modelled. (3) Weekday factors are estimated
+  jointly with the shift rather than from raw weekday means, which a shift would bias.
+- Bugs found by tests and fixed: an overflow for extremely small `alpha` (now bounded), float
+  rounding noise defeating a zero-variance check, and a crash formatting the summary when a
+  perfect step leaves no residual noise.
+- Measured limits (see the docs): the plausible set covers the true date about 96% of the time for a
+  15% step but only about 87% for an 8% step, so it is approximate.
