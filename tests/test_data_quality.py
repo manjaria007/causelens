@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from causelens.analytics import (
+    DataValidationError,
     DetectorParams,
     apply_default_exclusions,
     check_data_quality,
@@ -147,10 +148,12 @@ def test_abnormal_sessions_not_classed_as_tracking_issue():
     assert "traffic changed" in flag.reason
 
 
-def test_zero_session_day_has_no_rate_and_is_not_flagged():
+def test_zero_session_day_has_no_rate_and_is_reported_as_volume_anomaly_only():
     df = _flat()
     df.loc[20, ["sessions", "orders"]] = [0, 0]
-    assert check_data_quality(df).flags == []
+    flags = check_data_quality(df).flags_for("2026-08-21", "device=desktop")
+    assert [f.kind for f in flags] == ["volume_anomaly"]
+    assert flags[0].observed_rate is None  # no conversion rate on a zero-session day
 
 
 def test_zero_baseline_rate_is_skipped():
@@ -223,3 +226,160 @@ def test_no_flags_means_nothing_excluded():
     kept, summary = apply_default_exclusions(df, rep)
     assert len(kept) == len(df) and summary.rows_removed == 0
     assert "no days are excluded" in summary.statement.lower()
+
+
+# ------------------------------------------------------------------ review regressions
+# Finding 5: incident overlap must reflect a real shared population.
+
+
+def _with_incident_scope(events: pd.DataFrame, scope: str) -> pd.DataFrame:
+    out = events.copy()
+    out.loc[out["name"] == "Analytics tag deploy", "scope"] = scope
+    return out
+
+
+def test_incident_is_not_linked_when_scope_and_segment_never_co_occur(reference):
+    """Previously a mobile-only incident linked to browser=edge, but no mobile + edge traffic exists."""
+    metrics, events = reference
+    assert metrics[(metrics["device"] == "mobile") & (metrics["browser"] == "edge")].empty
+    rep = check_data_quality(metrics, _with_incident_scope(events, "device=mobile"))
+    edge = rep.flags_for(OUTAGE, "browser=edge")
+    assert edge, "the outage still trips browser=edge"
+    assert edge[0].linked_event is None
+
+
+def test_incident_links_to_real_partial_overlap_and_reports_its_size(reference):
+    metrics, events = reference
+    rep = check_data_quality(metrics, _with_incident_scope(events, "device=mobile"))
+    chrome = rep.flags_for(OUTAGE, "browser=chrome")[0].linked_event
+    assert chrome is not None and chrome.scope_overlap == "overlapping_scope"
+    day = metrics[metrics["date"] == "2026-09-20"]
+    in_chrome = day[day["browser"] == "chrome"]
+    expected = int(in_chrome.loc[in_chrome["device"] == "mobile", "sessions"].sum())
+    assert chrome.overlap_sessions == expected > 0
+    assert chrome.segment_share_in_scope == pytest.approx(expected / in_chrome["sessions"].sum())
+    assert 0 < chrome.segment_share_in_scope < 1
+
+
+def test_incident_scope_all_and_same_segment_report_full_overlap(reference):
+    metrics, events = reference
+    same = check_data_quality(metrics, events).flags_for(OUTAGE, "device=desktop")[0].linked_event
+    assert same.scope_overlap == "same_segment" and same.segment_share_in_scope == pytest.approx(1.0)
+    everyone = check_data_quality(metrics, _with_incident_scope(events, "all"))
+    link = everyone.flags_for(OUTAGE, "device=desktop")[0].linked_event
+    assert link.scope_overlap == "all_visitors" and link.segment_share_in_scope == pytest.approx(1.0)
+
+
+# Finding 6: parameter relationships and zero scales.
+
+
+def test_window_too_small_for_min_baseline_is_rejected():
+    """Previously window_days=7 with min_baseline_days=7 silently disabled all detection."""
+    with pytest.raises(ValueError, match="no baseline could ever form"):
+        DetectorParams(window_days=7)
+    ok = DetectorParams(window_days=7, min_baseline_days=6)
+    df = _flat()
+    df.loc[20, "orders"] = 100
+    assert check_data_quality(df, params=ok).flags_for("2026-08-21", "device=desktop")
+
+
+def test_even_window_is_rejected():
+    with pytest.raises(ValueError, match="window_days must be odd"):
+        DetectorParams(window_days=14)
+
+
+def test_zero_scale_settings_do_not_flag_constant_data():
+    """Previously 0/0 gave NaN scores and every date was flagged."""
+    params = DetectorParams(rel_scale_floor=0, sampling_noise_floor=False, min_relative_deviation=0)
+    rep = check_data_quality(_flat(), params=params)
+    assert rep.flags == []
+
+
+def test_zero_scale_flags_any_real_deviation_with_undefined_z():
+    params = DetectorParams(rel_scale_floor=0, sampling_noise_floor=False, min_relative_deviation=0)
+    df = _flat()
+    df.loc[20, "orders"] = 299
+    rep = check_data_quality(df, params=params)
+    assert {f.date for f in rep.flags} == {date(2026, 8, 21)}
+    flag = rep.flags_for("2026-08-21", "device=desktop")[0]
+    assert flag.robust_z is None and "zero spread" in flag.reason
+    rep.model_dump_json()  # no NaN/inf values in the report
+
+
+# Finding 7: volume-only anomalies.
+
+
+@pytest.mark.parametrize(("sessions", "orders"), [(1_000, 30), (0, 0), (25_000, 750)])
+def test_volume_only_anomaly_is_reported(sessions, orders):
+    """Conversion stays at 3%; only the volume changes."""
+    df = _flat()
+    df.loc[20, ["sessions", "orders"]] = [sessions, orders]
+    rep = check_data_quality(df)
+    flags = rep.flags_for("2026-08-21", "device=desktop")
+    assert [f.kind for f in flags] == ["volume_anomaly"]
+    assert flags[0].sessions_normal is False
+    assert "cause not established" in flags[0].reason
+    assert date(2026, 8, 21) in rep.excluded_dates  # excluded by default like other flags
+
+
+def test_normal_weekday_sized_traffic_swing_is_not_a_volume_anomaly():
+    df = _flat()
+    df.loc[20, ["sessions", "orders"]] = [11_500, 345]  # +15%, same conversion
+    assert check_data_quality(df).flags == []
+
+
+def test_conversion_and_volume_change_together_keep_the_combined_kind():
+    df = _flat()
+    df.loc[20, ["sessions", "orders"]] = [1_000, 15]
+    flags = check_data_quality(df).flags_for("2026-08-21", "device=desktop")
+    assert [f.kind for f in flags] == ["conversion_shift_with_abnormal_sessions"]
+
+
+def test_reference_data_has_no_volume_anomalies(report):
+    assert not [f for f in report.flags if f.kind == "volume_anomaly"]
+
+
+# Persistent changes near the end of the data.
+
+
+def _persistent_drop(post_days: int) -> pd.DataFrame:
+    df = _flat(days=40)
+    df.loc[40 - post_days :, "orders"] = 200  # 3.0% -> 2.0%, and it stays there
+    return df
+
+
+def test_persistent_drop_in_final_days_is_flagged_but_marked_truncated():
+    """Known limitation: with < 7 post-change days the baseline cannot see the change persist."""
+    rep = check_data_quality(_persistent_drop(3))
+    flags = [f for f in rep.flags if f.segment == "device=desktop"]
+    assert [f.date for f in flags] == [date(2026, 9, 7), date(2026, 9, 8), date(2026, 9, 9)]
+    assert all(f.baseline_truncated for f in flags)
+    assert all("baseline is truncated" in f.reason for f in flags)
+    assert rep.excluded_dates == rep.truncated_baseline_dates == [f.date for f in flags]
+    assert "Caution" in rep.exclusion_statement and "persistent behaviour change" in rep.exclusion_statement
+
+
+def test_exclusion_summary_repeats_the_truncation_caution():
+    df = _persistent_drop(3)
+    _, summary = apply_default_exclusions(df, check_data_quality(df))
+    assert summary.truncated_baseline_dates == summary.excluded_dates
+    assert "truncated baseline" in summary.statement
+
+
+def test_persistent_change_with_enough_post_days_is_not_flagged():
+    assert check_data_quality(_persistent_drop(8)).flags == []  # step with 8 days after it
+    mid = _flat(days=40)
+    mid.loc[20:, "orders"] = 200
+    assert check_data_quality(mid).flags == []
+
+
+def test_outage_with_full_baseline_is_not_marked_truncated(report):
+    flag = report.flags_for(OUTAGE, "device=desktop")[0]
+    assert (flag.baseline_days_before, flag.baseline_days_after) == (7, 7)
+    assert not flag.baseline_truncated
+    assert report.truncated_baseline_dates == []
+
+
+def test_invalid_input_still_raises_typed_error():
+    with pytest.raises(DataValidationError):
+        check_data_quality(_flat().assign(orders=-1))

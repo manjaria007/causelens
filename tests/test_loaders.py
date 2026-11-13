@@ -161,3 +161,124 @@ def test_event_validation_errors():
     assert "'type' value 'outage'" in msg and "column 'scope'" in msg
     ok = validate_events(ev.assign(type="incident", scope="all"))
     assert ok["description"].iloc[0] == ""
+
+
+# ------------------------------------------------------------------ review regressions
+
+
+@pytest.mark.parametrize("value", [2**63, 2**53, 2**70, 1e300, "9223372036854775808", "9007199254740993"])
+def test_counts_beyond_exact_range_are_rejected_not_wrapped(value):
+    """Previously sessions = orders = 2**63 silently became -9223372036854775808."""
+    for dtype in (None, object, str):
+        frame = _with(sessions=[value, 200], orders=[value, 10])
+        if dtype is not None:
+            frame = frame.astype(dtype)
+        with pytest.raises(DataValidationError, match="exceeds the maximum supported count"):
+            validate_metrics(frame)
+
+
+def test_largest_exact_count_is_accepted_and_stays_positive():
+    top = 2**53 - 1
+    out = validate_metrics(_with(sessions=[top, 200], orders=[10, 10]))
+    assert out["sessions"].max() == top and (out["sessions"] > 0).all()
+
+
+def test_infinite_count_is_rejected():
+    with pytest.raises(DataValidationError, match="not a whole number"):
+        validate_metrics(_with(sessions=[float("inf"), 200], orders=[1, 10]))
+
+
+def _write(tmp_path, text, name="m.csv"):
+    path = tmp_path / name
+    path.write_text(text)
+    return path
+
+
+HEADER = "date,device,browser,channel,customer_type,sessions,orders\n"
+
+
+def test_extra_leading_csv_field_is_an_error_not_an_index(tmp_path):
+    """Previously pandas read the extra first field as an index and loaded the row."""
+    path = _write(tmp_path, HEADER + "EXTRA,2026-08-01,desktop,chrome,organic,new,10,1\n")
+    with pytest.raises(DataValidationError, match=r"row 2: has 8 field\(s\), expected 7"):
+        load_metrics(path)
+
+
+def test_short_and_long_csv_rows_are_errors_with_line_numbers(tmp_path):
+    path = _write(
+        tmp_path,
+        HEADER
+        + "2026-08-01,desktop,chrome,organic,new,10,1\n"
+        + "2026-08-02,desktop,chrome,organic,new,10\n"
+        + "2026-08-03,desktop,chrome,organic,new,10,1,99\n",
+    )
+    with pytest.raises(DataValidationError) as exc:
+        load_metrics(path)
+    assert "row 3: has 6 field(s)" in str(exc.value) and "row 4: has 8 field(s)" in str(exc.value)
+
+
+def test_blank_lines_are_skipped_and_line_numbers_stay_accurate(tmp_path):
+    path = _write(
+        tmp_path,
+        HEADER + "\n2026-08-01,desktop,chrome,organic,new,10,1\n\n2026-08-02,desktop,chrome,organic,new,10,11\n",
+    )
+    with pytest.raises(DataValidationError, match="row 5: orders"):
+        load_metrics(path)
+
+
+def test_event_csv_rows_are_length_checked(tmp_path):
+    path = _write(tmp_path, "date,type,name,scope,description\nEXTRA,2026-09-20,incident,x,all,d\n", "e.csv")
+    with pytest.raises(DataValidationError, match=r"row 2: has 6 field\(s\), expected 5"):
+        load_events(path)
+
+
+def test_csv_structure_errors_are_typed(tmp_path):
+    with pytest.raises(DataValidationError, match="file is empty"):
+        load_metrics(_write(tmp_path, ""))
+    with pytest.raises(DataValidationError, match="duplicate header"):
+        load_metrics(_write(tmp_path, "date,date,device\n1,2,3\n"))
+    bad = tmp_path / "b.csv"
+    bad.write_bytes(b"date,device\n\xff\xfe,x\n")
+    with pytest.raises(DataValidationError, match="not valid UTF-8"):
+        load_metrics(bad)
+    with pytest.raises(DataValidationError, match="cannot read file"):
+        load_metrics(tmp_path)  # a directory
+
+
+def test_csv_with_bom_and_quoted_fields_loads(tmp_path):
+    path = tmp_path / "bom.csv"
+    path.write_bytes(
+        ("\ufeff" + HEADER + '"2026-08-01","desktop","chrome","organic","new","10","1"\n').encode()
+    )
+    assert len(load_metrics(path)) == 1
+
+
+def test_repeated_event_index_labels_are_valid():
+    """Previously raised 'truth value of a Series is ambiguous'."""
+    ev = pd.DataFrame(
+        {"date": ["2026-09-01", "2026-09-02"], "type": ["incident"] * 2, "name": ["a", "b"], "scope": ["all"] * 2},
+        index=[0, 0],
+    )
+    assert list(validate_events(ev)["name"]) == ["a", "b"]
+
+
+def test_repeated_event_index_labels_report_the_offending_row():
+    ev = pd.DataFrame(
+        {"date": ["2026-09-01", "2026-09-02"], "type": ["incident", "outage"], "name": ["a", "b"], "scope": ["all"] * 2},
+        index=["x", "x"],
+    )
+    with pytest.raises(DataValidationError, match="row index x: column 'type' value 'outage'"):
+        validate_events(ev)
+
+
+def test_repeated_and_unsorted_metric_index_labels_are_handled():
+    frame = pd.concat([GOOD, GOOD.assign(date=["2026-08-03", "2026-08-04"])])  # index 0,1,0,1
+    assert not frame.index.is_unique
+    assert len(validate_metrics(frame)) == 4
+    bad = frame.copy()
+    bad.iloc[2, bad.columns.get_loc("orders")] = -5
+    with pytest.raises(DataValidationError, match=r"row index 0: column 'orders' is negative \(-5\)"):
+        validate_metrics(bad)
+    dup = pd.concat([GOOD, GOOD])
+    with pytest.raises(DataValidationError, match="duplicate"):
+        validate_metrics(dup)
