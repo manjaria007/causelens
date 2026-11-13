@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "pytest-on-python-save",
+      "description": "Run the test suite and surface failures when Kiro saves Python files in causelens.",
+      "trigger": "PostFileSave",
+      "matcher": "(^|/)causelens/.*\\.py$",
+      "action": {
+        "type": "command",
+        "command": ".venv/bin/python -m pytest -q"
+      },
+      "timeout": 120
+    }
+  ]
+}
