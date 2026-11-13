@@ -383,3 +383,68 @@ def test_outage_with_full_baseline_is_not_marked_truncated(report):
 def test_invalid_input_still_raises_typed_error():
     with pytest.raises(DataValidationError):
         check_data_quality(_flat().assign(orders=-1))
+
+
+# ------------------------------------------------------------------ final review corrections
+# Historical overlap must not be presented as same-day overlap.
+
+
+def _mobile_used_edge_only_early(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Add mobile + Edge traffic before 2026-09-10 only (mobile later uses Chrome)."""
+    early = metrics[
+        (metrics["device"] == "mobile") & (metrics["browser"] == "chrome") & (metrics["date"] < "2026-09-10")
+    ].assign(browser="edge")
+    return pd.concat([metrics, early], ignore_index=True)
+
+
+def test_historical_only_overlap_is_distinguished_from_observed_overlap(reference):
+    """Mobile used Edge earlier, but on the flagged day no mobile + Edge sessions exist."""
+    metrics, events = reference
+    rep = check_data_quality(_mobile_used_edge_only_early(metrics), _with_incident_scope(events, "device=mobile"))
+
+    edge = rep.flags_for(OUTAGE, "browser=edge")[0].linked_event
+    assert edge is not None
+    assert edge.overlap_basis == "historical_only"
+    assert edge.overlap_sessions == 0
+    assert edge.segment_share_in_scope == 0.0
+    assert "Possible overlap only" in edge.note
+    assert "inferred from history, not observed" in edge.note
+    assert "outside the incident's scope that day" in edge.note
+    assert "not proof" in edge.note
+
+    chrome = rep.flags_for(OUTAGE, "browser=chrome")[0].linked_event
+    assert chrome.overlap_basis == "observed_on_flagged_day" and chrome.overlap_sessions > 0
+    assert "Possible overlap only" not in chrome.note
+    assert "coincidence, not proof" in chrome.note
+
+
+def test_observed_overlap_is_the_basis_for_ordinary_links(report):
+    link = report.flags_for(OUTAGE, "device=desktop")[0].linked_event
+    assert link.overlap_basis == "observed_on_flagged_day"
+    assert link.overlap_sessions > 0 and link.segment_share_in_scope == pytest.approx(1.0)
+
+
+def test_zero_volume_outage_can_link_on_history_with_hedged_wording():
+    df = _flat()
+    df.loc[20, ["sessions", "orders"]] = [0, 0]  # the segment vanishes entirely that day
+    events = pd.DataFrame(
+        {"date": ["2026-08-21"], "type": ["incident"], "name": ["Collector outage"], "scope": ["device=desktop"]}
+    )
+    flag = check_data_quality(df, events).flags_for("2026-08-21", "device=desktop")[0]
+    assert flag.kind == "volume_anomaly"
+    link = flag.linked_event
+    assert link is not None and link.overlap_basis == "historical_only"
+    assert link.overlap_sessions == 0 and link.segment_share_in_scope is None
+    assert "zero-volume outage" in link.note and "not observed" in link.note
+    assert "not proof" in link.note
+
+
+def test_historical_link_still_requires_shared_traffic_somewhere(reference):
+    metrics, events = reference  # no mobile + Edge traffic at all, ever
+    rep = check_data_quality(metrics, _with_incident_scope(events, "device=mobile"))
+    assert rep.flags_for(OUTAGE, "browser=edge")[0].linked_event is None
+
+
+def test_link_models_serialise_the_basis(report):
+    dumped = report.flags_for(OUTAGE, "device=desktop")[0].model_dump(mode="json")
+    assert dumped["linked_event"]["overlap_basis"] == "observed_on_flagged_day"

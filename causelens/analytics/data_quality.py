@@ -113,9 +113,15 @@ class LinkedEvent(BaseModel):
     name: str
     scope: str
     scope_overlap: Literal["all_visitors", "same_segment", "overlapping_scope"]
+    overlap_basis: Literal["observed_on_flagged_day", "historical_only"] = Field(
+        description="'observed_on_flagged_day': traffic inside both segment and scope was recorded "
+        "that day. 'historical_only': segment and scope shared traffic elsewhere in the data, but "
+        "none that day (for example a zero-volume outage), so the overlap is inferred, not observed."
+    )
     overlap_sessions: int = Field(description="Sessions on the flagged day inside both segment and scope.")
     segment_share_in_scope: float | None = Field(
-        description="Share of the flagged segment's sessions that day inside the incident scope."
+        description="Share of the flagged segment's sessions that day inside the incident scope; "
+        "None when the segment had no sessions that day."
     )
     note: str
 
@@ -265,8 +271,8 @@ class _Linker:
         for ev_date, name, scope_text, scope in self._incidents:
             if abs((day - ev_date).days) > self._tol:
                 continue
-            # Disjoint or never co-occurring (e.g. mobile-only incident vs browser=edge when the
-            # data has no mobile + edge traffic): nothing for the incident to have touched.
+            # Never co-occurring anywhere in the data (e.g. mobile-only incident vs browser=edge
+            # when there is no mobile + edge traffic at all): nothing for the incident to touch.
             if not self._shares_population(dim, value, scope):
                 continue
             rows = self._by_day.get(pd.Timestamp(day))
@@ -275,18 +281,37 @@ class _Linker:
                 in_segment = rows.loc[rows[dim] == value, "sessions"].sum()
                 overlap = int(rows.loc[self._mask(rows, dim, value, scope), "sessions"].sum())
                 share = float(overlap / in_segment) if in_segment > 0 else None
+            observed = overlap > 0
+            if observed:
+                basis = "observed_on_flagged_day"
+                note = (
+                    f"Coincides in time and scope with incident '{name}'. This is a "
+                    "coincidence, not proof that the incident caused the shift; confirm with "
+                    "the owning team's logs or an independent data source."
+                )
+            else:
+                basis = "historical_only"
+                note = (
+                    f"Possible overlap only: incident '{name}' is dated the same day, and its scope "
+                    f"shared traffic with this segment elsewhere in the data, but no sessions inside "
+                    "both were recorded on the flagged day"
+                    + (
+                        " (the segment itself had none either, which fits a zero-volume outage)"
+                        if share is None
+                        else " (the flagged traffic lay outside the incident's scope that day)"
+                    )
+                    + ". The overlap is inferred from history, not observed, so this is weaker than a "
+                    "same-day overlap and is not proof that the incident caused the shift."
+                )
             return LinkedEvent(
                 date=ev_date,
                 name=name,
                 scope=scope_text,
                 scope_overlap=_scope_relation(scope, dim, value),  # type: ignore[arg-type]
+                overlap_basis=basis,  # type: ignore[arg-type]
                 overlap_sessions=overlap,
                 segment_share_in_scope=share,
-                note=(
-                    f"Coincides in time and scope with incident '{name}'. This is a "
-                    "coincidence, not proof that the incident caused the shift; confirm with "
-                    "the owning team's logs or an independent data source."
-                ),
+                note=note,
             )
         return None
 

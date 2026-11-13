@@ -11,18 +11,32 @@ return typed, sorted copies (`date` is `datetime64`, counts are `int64`) or rais
 `DataValidationError`, which names the file, row and column. Nothing partial is returned.
 
 **Metrics are rejected for:** missing required columns; unparseable (non `YYYY-MM-DD`) dates;
-blank dimension values; missing, non-integer, infinite or negative `sessions`/`orders`; counts
-above `MAX_COUNT` (2**53 − 1, the largest integer a float64 holds exactly; checked *before*
-conversion so large values can never wrap to negative); `orders > sessions`; duplicate
-(date, segment) rows; no rows. **Events are rejected for:** a missing `date/type/name/scope`
-column, an unknown `type` (not `release|campaign|incident`), or an unparseable scope.
-`description` is optional.
+blank dimension values; `sessions`/`orders` that are missing, negative, not exactly whole numbers
+or above `MAX_COUNT`; `orders > sessions`; duplicate (date, segment) rows; no rows. **Events are
+rejected for:** a missing `date/type/name/scope` column, an unknown `type` (not
+`release|campaign|incident`), or an unparseable scope. `description` is optional.
 
-**CSV structure.** Files are read with the `csv` module, not `pandas.read_csv`, so every
-record must have exactly as many fields as the header. A row with an extra leading field (which
-pandas would silently treat as an index), a short row, or an extra trailing field is a typed
-error naming the line number. Blank lines are skipped, a UTF-8 BOM is accepted, and an empty
-file, duplicate header names, undecodable bytes and unreadable paths are typed errors.
+**Exact counts.** Each count is checked in its *original* form, never after a float conversion.
+Strings are matched against a plain ASCII number grammar and parsed with `Decimal`, so
+`"100.0000000000000001"` and `"9007199254740990.5"` are fractions and are rejected rather than
+rounded to a whole number. Accepted: ints (including NumPy ints), integral floats, and numeric
+strings such as `"100"`, `" 100 "`, `"100.0"` or `"1e3"`. Rejected as "not a whole number":
+fractions, booleans, complex numbers (including `100+0j`), NaN, infinity, missing values,
+`"1_000"`, `"0x10"` and any other type. `MAX_COUNT` is 2**53 − 1 (the largest integer a float64
+holds exactly, and far below int64); larger values, including absurd exponents like `"1e999999999"`
+(rejected without being expanded), are rejected so they can never wrap or round.
+
+**CSV structure.** Files are read with the `csv` module in strict mode, not `pandas.read_csv`.
+Every record must have exactly as many fields as the header: a row with an extra leading field
+(which pandas would treat as an index), a short row, or an extra trailing field is a typed error
+naming the line number. Strict mode rejects an unclosed quote at end of file and text after a
+closing quote (a quote in the middle of an *unquoted* field is a literal character, as in standard
+CSV). Because an unclosed quote could otherwise absorb the following records, **a record may not
+span physical lines: fields must not contain line breaks**, even inside quotes. A record that
+does is rejected with the line range, which also catches an unclosed quote that a later quote
+appears to close. Blank lines are skipped, a UTF-8 BOM is accepted, quoted commas and doubled
+quotes work, and an empty file, duplicate header names, undecodable bytes and unreadable paths
+are typed errors.
 
 **Row labels.** Validation is positional, so frames with repeated or unsorted index labels
 (for example from `pd.concat`) are fine. For files, error rows are CSV line numbers (header =
@@ -132,14 +146,27 @@ just begun, and the detector cannot tell them apart.
 
 An `incident` event links to a flag when `|flag date − incident date| ≤ incident_tolerance_days`
 (default: same day; the schema has no duration) **and the incident's scope and the flagged
-segment share real traffic**: at least one row with `sessions > 0` in the dataset satisfies both
-the segment (`dimension=value`) and every scope term. Scope `all` shares traffic with every
-segment. A `device=mobile` incident therefore does not link to `browser=edge` when the data has
-no mobile + Edge rows, even though the two terms never directly contradict each other. The link
-records `scope_overlap` (`all_visitors`, `same_segment` or `overlapping_scope`), the
-`overlap_sessions` on the flagged day inside both segment and scope, and
-`segment_share_in_scope` (that overlap divided by the segment's sessions that day). Only the
-first matching incident (by date, then name) is linked.
+segment share real traffic**: at least one row with `sessions > 0` anywhere in the dataset
+satisfies both the segment (`dimension=value`) and every scope term. Scope `all` shares traffic
+with every segment. A `device=mobile` incident therefore does not link to `browser=edge` when the
+data has no mobile + Edge rows at all, even though the two terms never directly contradict each
+other. Only the first matching incident (by date, then name) is linked.
+
+Every link says **how** the overlap is known (`overlap_basis`):
+
+- `observed_on_flagged_day`: sessions inside both the segment and the incident scope were
+  recorded on the flagged day (`overlap_sessions > 0`). `segment_share_in_scope` is that overlap
+  divided by the segment's sessions that day.
+- `historical_only`: the two shared traffic elsewhere in the data, but **none on the flagged
+  day** (`overlap_sessions = 0`). Example: mobile used Edge earlier in the period but now uses
+  Chrome, so a mobile-only incident and an Edge anomaly share no traffic that day. It can still be
+  informative when the in-scope traffic vanished in the outage itself (a zero-volume day, where
+  `segment_share_in_scope` is `None`), but it is inferred, not observed, and weaker. Its note says
+  "Possible overlap only", that the overlap is "inferred from history, not observed", and whether
+  the flagged traffic lay outside the incident's scope that day or the segment itself had none.
+  Consumers should weight these links less.
+
+Also recorded: `scope_overlap` (`all_visitors`, `same_segment` or `overlapping_scope`).
 
 A link is a **coincidence in time and scope, not evidence of causation**. The report text says
 "possible tracking issue" and "not proof", per `.kiro/steering/scientist-rules.md`. Confirming
@@ -164,8 +191,9 @@ plus an `ExclusionSummary` (dates, truncated-baseline dates, rows removed, state
 ## Tests
 
 - `tests/test_loaders.py`, `tests/test_data_quality.py`: unit and regression tests (loader
-  errors, count range, CSV structure, repeated index labels, reference-data flags, incident
-  population overlap, parameter validation, zero scale, volume anomalies, end-of-series limits).
+  errors, exact count validation, strict CSV quoting and structure, repeated index labels,
+  reference-data flags, incident population overlap and its observed/historical basis, parameter
+  validation, zero scale, volume anomalies, end-of-series limits).
 - `tests/test_data_quality_property.py`: two kinds of test, kept apart on purpose.
   - *Guaranteed* Hypothesis properties use **bounded** fixtures whose value ranges make the
     outcome arithmetic (the bounds and the argument are in the fixture's docstring): an order

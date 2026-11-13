@@ -8,6 +8,8 @@ the user where a problem is.
 from __future__ import annotations
 
 import csv
+import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
@@ -69,41 +71,71 @@ def _parse_dates(series: pd.Series, rows: _Rows, problems: list[str]) -> pd.Seri
     return parsed
 
 
-def _to_float(series: pd.Series) -> np.ndarray:
-    """Best-effort float64 view of a count column; unparseable or huge values become NaN/inf."""
-    try:
-        return pd.to_numeric(series, errors="coerce").astype("float64").to_numpy()
-    except (OverflowError, ValueError, TypeError):
-        out = np.full(len(series), np.nan)
-        for i, value in enumerate(series.to_numpy(dtype=object)):
-            try:
-                out[i] = float(value)
-            except (OverflowError, ValueError, TypeError):
-                out[i] = np.nan
-        return out
+_NUMBER_TEXT = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?", re.ASCII)
+
+# Reasons returned by _exact_count.
+_NOT_WHOLE, _NEGATIVE, _TOO_BIG = "not_whole", "negative", "too_big"
+
+
+def _exact_count(value: object) -> tuple[int | None, str | None]:
+    """Exactly interpret one count, or say why it is invalid. Never rounds.
+
+    The *original* value is inspected, not a float conversion of it: ``"100.0000000000000001"``
+    and ``"9007199254740990.5"`` are fractions and are rejected, not rounded to whole numbers.
+    Accepts ints, integral floats and numeric strings such as ``"100"``, ``"100.0"`` or
+    ``"1e3"``. Rejects booleans, complex numbers, NaN/inf, missing values and anything else.
+    Returns ``(count, None)`` for a valid count in ``[0, MAX_COUNT]``.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return None, _NOT_WHOLE
+    if isinstance(value, (int, np.integer)):
+        exact = int(value)
+    elif isinstance(value, (float, np.floating)):
+        if not np.isfinite(value) or float(value) != int(float(value)):
+            return None, _NOT_WHOLE
+        exact = int(float(value))
+    elif isinstance(value, str):
+        text = value.strip()
+        if not _NUMBER_TEXT.fullmatch(text):
+            return None, _NOT_WHOLE
+        try:
+            number = Decimal(text)
+        except InvalidOperation:  # pragma: no cover - regex already guarantees a valid literal
+            return None, _NOT_WHOLE
+        if number.adjusted() > 30:  # astronomically large: do not materialise it
+            return None, _NEGATIVE if number < 0 else _TOO_BIG
+        if number != number.to_integral_value():
+            return None, _NOT_WHOLE
+        exact = int(number)
+    else:  # complex, Decimal/Fraction objects, None, pd.NA, ...
+        return None, _NOT_WHOLE
+    if exact < 0:
+        return None, _NEGATIVE
+    if exact > MAX_COUNT:
+        return None, _TOO_BIG
+    return exact, None
 
 
 def _check_counts(col: str, series: pd.Series, rows: _Rows, problems: list[str]) -> np.ndarray:
-    """Validate a count column and return it as float64 (converted to int64 by the caller)."""
-    numeric = _to_float(series)
+    """Validate a count column exactly and return it as int64 (values are already in range)."""
     raw = series.to_numpy(dtype=object)
-    with np.errstate(invalid="ignore"):
-        not_whole = np.isnan(numeric) | ~np.isfinite(numeric) | (np.mod(numeric, 1) != 0)
-        negative = ~not_whole & (numeric < 0)
-        # At or above 2**53 a float64 may already have been rounded: reject, never convert.
-        too_big = ~not_whole & (numeric >= 2**53)
-    for pos in _positions(not_whole):
-        problems.append(
-            f"{rows.label(pos)}: column '{col}' value {raw[pos]!r} is not a whole number"
-        )
-    for pos in _positions(negative):
-        problems.append(f"{rows.label(pos)}: column '{col}' is negative ({raw[pos]})")
-    for pos in _positions(too_big):
-        problems.append(
-            f"{rows.label(pos)}: column '{col}' value {raw[pos]!r} exceeds the maximum "
-            f"supported count ({MAX_COUNT})"
-        )
-    return numeric
+    out = np.zeros(len(raw), dtype="int64")
+    for pos, value in enumerate(raw):
+        count, reason = _exact_count(value)
+        if reason is None:
+            out[pos] = count
+        elif reason == _NEGATIVE:
+            problems.append(f"{rows.label(pos)}: column '{col}' is negative ({value})")
+        elif reason == _TOO_BIG:
+            problems.append(
+                f"{rows.label(pos)}: column '{col}' value {value!r} exceeds the maximum "
+                f"supported count ({MAX_COUNT})"
+            )
+        else:
+            problems.append(
+                f"{rows.label(pos)}: column '{col}' value {value!r} is not a whole number"
+            )
+    return out
 
 
 def validate_metrics(
@@ -136,8 +168,7 @@ def validate_metrics(
     counts = {col: _check_counts(col, work[col], rows, problems) for col in ("sessions", "orders")}
     _fail(source, problems)
 
-    sessions = counts["sessions"].astype("int64")
-    orders = counts["orders"].astype("int64")
+    sessions, orders = counts["sessions"], counts["orders"]
     work["sessions"], work["orders"] = sessions, orders
 
     for pos in _positions(orders > sessions):
@@ -220,16 +251,18 @@ def validate_events(
 
 
 def _read_csv_strict(path: Path) -> pd.DataFrame:
-    """Read a CSV as strings, rejecting any record whose field count differs from the header.
+    """Read a CSV as strings, rejecting any record that is not a well-formed single line.
 
     ``pandas.read_csv`` treats an extra leading field as an index and silently drops or
-    pads fields, so records are checked here. The frame's index holds CSV line numbers.
-    Blank lines are skipped.
+    pads fields, so records are checked here: the parser is strict (unclosed or stray quotes
+    are errors), each record must have as many fields as the header, and a record may not span
+    several physical lines (so an unclosed quote cannot swallow the next record). The frame's
+    index holds CSV line numbers. Blank lines are skipped.
     """
     source = str(path)
     try:
         with path.open(newline="", encoding="utf-8-sig") as handle:
-            reader = csv.reader(handle)
+            reader = csv.reader(handle, strict=True)
             header = next(reader, None)
             if header is None:
                 raise DataValidationError(source, ["file is empty"])
@@ -246,9 +279,22 @@ def _read_csv_strict(path: Path) -> pd.DataFrame:
                     record = next(reader)
                 except StopIteration:
                     break
+                except csv.Error as exc:
+                    # strict mode: unclosed quote at end of file, stray quote inside a field, ...
+                    raise DataValidationError(
+                        source, [f"row {previous + 1}: malformed CSV record ({exc})"]
+                    ) from None
                 if not record:
                     continue
                 line = previous + 1
+                if reader.line_num - previous > 1:
+                    # A quoted field ran across line breaks. Records here are one line each, and
+                    # an unclosed quote would otherwise absorb the following records into it.
+                    problems.append(
+                        f"row {line}: record spans lines {line}-{reader.line_num} (a quoted field "
+                        "contains a line break or a quote is not closed); fields must not contain line breaks"
+                    )
+                    continue
                 if len(record) != len(header):
                     problems.append(
                         f"row {line}: has {len(record)} field(s), expected {len(header)} "

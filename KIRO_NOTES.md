@@ -75,6 +75,10 @@ For each task, record:
   end-of-series limitation is now exposed in the flags, report and exclusion statement.
   Raising the sessions threshold to 0.40 was a calibration against observed weekday swings
   (up to 0.30 over 100 seeds), documented as such.
-- Results: `.venv/bin/python -m pytest -q` passed (87 tests);
+- Second review round: counts are now validated exactly from the original value (no float
+  rounding, complex rejected); the CSV reader is strict and rejects records spanning lines so an
+  unclosed quote cannot swallow later events; incident links now state whether overlap was
+  observed on the flagged day or only historical. Each has a regression test.
+- Results: `.venv/bin/python -m pytest -q` passed (129 tests);
   `.venv/bin/python -m ruff check causelens tests` passed.
 - Hook activation in Kiro was not verified.

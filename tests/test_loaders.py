@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -282,3 +283,139 @@ def test_repeated_and_unsorted_metric_index_labels_are_handled():
     dup = pd.concat([GOOD, GOOD])
     with pytest.raises(DataValidationError, match="duplicate"):
         validate_metrics(dup)
+
+
+# ------------------------------------------------------------------ final review corrections
+# Exact count validation: the original value is checked, never a float conversion of it.
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "100.0000000000000001",  # previously rounded to 100
+        "9007199254740990.5",  # previously rounded to 9007199254740990
+        "100.5",
+        "1e-3",
+        "100+5j",
+        "0x10",
+        "1_000",
+        "",
+        " ",
+        "nan",
+        "inf",
+        "-inf",
+    ],
+)
+def test_string_counts_must_be_exactly_whole_numbers(value):
+    with pytest.raises(DataValidationError, match="column 'sessions' value .* is not a whole number"):
+        validate_metrics(_with(sessions=[value, "200"], orders=["1", "10"]))
+
+
+@pytest.mark.parametrize("value", [100.5, float("nan"), complex(100, 5), complex(100, 0), True, None, pd.NA, [1]])
+def test_non_string_counts_must_be_exactly_whole_numbers(value):
+    """Previously complex(100, 5) was silently cast to 100."""
+    frame = _with(orders=[1, 10]).astype({"sessions": object})
+    frame.loc[0, "sessions"] = value
+    with pytest.raises(DataValidationError, match="column 'sessions' value .* is not a whole number"):
+        validate_metrics(frame)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("100", 100),
+        (" 100 ", 100),
+        ("100.0", 100),
+        ("+100.000", 100),
+        ("1e3", 1000),
+        (100, 100),
+        (100.0, 100),
+        (2**53 - 1, 2**53 - 1),
+        ("9007199254740991", 2**53 - 1),
+    ],
+)
+def test_exactly_whole_counts_are_accepted_unchanged(value, expected):
+    frame = _with(orders=[1, 10]).astype({"sessions": object})
+    frame.loc[0, "sessions"] = value
+    out = validate_metrics(frame)
+    assert out.loc[out["date"] == "2026-08-02", "sessions"].iloc[0] == expected
+
+
+def test_numpy_scalar_counts_are_accepted():
+    frame = _with(sessions=[np.int32(100), np.float64(200.0)], orders=[np.int64(1), 10]).astype(object)
+    assert list(validate_metrics(frame)["sessions"]) == [200, 100]
+
+
+def test_huge_exponent_counts_are_rejected_without_materialising_them():
+    with pytest.raises(DataValidationError, match="exceeds the maximum supported count"):
+        validate_metrics(_with(sessions=["1e999999999", "200"], orders=["1", "10"]))
+    with pytest.raises(DataValidationError, match="is negative"):
+        validate_metrics(_with(sessions=["-1e999999999", "200"], orders=["1", "10"]))
+
+
+def test_count_errors_name_the_row_in_files(tmp_path):
+    path = _write(tmp_path, HEADER + "2026-08-01,desktop,chrome,organic,new,100.0000000000000001,1\n")
+    with pytest.raises(DataValidationError, match=r"row 2: column 'sessions' value '100\.0000000000000001'"):
+        load_metrics(path)
+
+
+# Strict CSV quoting: an unfinished quote must not swallow following records.
+
+EVENTS_HEADER = "date,type,name,scope,description\n"
+
+
+def test_unclosed_quote_cannot_swallow_the_next_event(tmp_path):
+    """Previously this returned ONE event whose description contained the second record."""
+    path = _write(
+        tmp_path,
+        EVENTS_HEADER
+        + '2026-09-20,incident,Analytics tag deploy,device=desktop,"unfinished\n'
+        + "2026-10-13,release,Homepage hero refresh,all,New hero\n",
+        "e.csv",
+    )
+    with pytest.raises(DataValidationError, match="malformed CSV record|spans lines"):
+        load_events(path)
+
+
+def test_unclosed_quote_that_a_later_quote_appears_to_close_is_still_rejected(tmp_path):
+    """The merged record may even have the right number of fields; spanning lines is the tell."""
+    path = _write(
+        tmp_path,
+        EVENTS_HEADER
+        + '2026-09-20,incident,A,device=desktop,"unfinished\n'
+        + '2026-10-13,release,B,all,"closes it"\n'
+        + "2026-10-14,release,C,all,third\n",
+        "e.csv",
+    )
+    with pytest.raises(DataValidationError) as exc:
+        load_events(path)
+    assert "row 2" in str(exc.value)
+
+
+def test_unclosed_quote_error_names_the_line(tmp_path):
+    path = _write(
+        tmp_path,
+        EVENTS_HEADER
+        + "2026-09-01,release,A,all,fine\n"
+        + '2026-09-20,incident,B,all,"unfinished\n',
+        "e.csv",
+    )
+    with pytest.raises(DataValidationError, match=r"row 3"):
+        load_events(path)
+
+
+def test_text_after_a_closing_quote_is_rejected(tmp_path):
+    path = _write(tmp_path, EVENTS_HEADER + '2026-09-20,incident,A,all,"closed"junk\n', "e.csv")
+    with pytest.raises(DataValidationError, match="row 2: malformed CSV record"):
+        load_events(path)
+
+
+def test_quoted_commas_and_escaped_quotes_still_load(tmp_path):
+    path = _write(
+        tmp_path,
+        EVENTS_HEADER + '2026-09-20,incident,"Tag deploy, v2",device=desktop,"said ""rolled back"""\n',
+        "e.csv",
+    )
+    events = load_events(path)
+    assert events["name"].iloc[0] == "Tag deploy, v2"
+    assert events["description"].iloc[0] == 'said "rolled back"'
