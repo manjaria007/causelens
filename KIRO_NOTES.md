@@ -172,3 +172,30 @@ For each task, record:
   further random draws, with a worst residual of 1.2e-14 pp.
 - The `Stop` hook still has no execution record (see the Hooks section on the `hook-pytest-on-stop`
   branch); these results come from running the commands directly.
+
+### Task 4 review round (PR #4, review supplied by the user)
+
+- Four findings, each reproduced on commit `64e0cf8` before fixing, with regression tests checked against
+  the previous behaviour on the exact fixtures: (1) when the top-ranked set failed the 50% traffic limit the
+  output said "spread across traffic" although a narrower combination qualified (86% of the change on 30% of
+  traffic); (2) an estimated quasi-binomial dispersion was treated as known, rejecting 7.2% of true nulls at a
+  nominal 5% with seven days per window (my own run of the reviewer's setting: 7.2%, 92.7% interval
+  coverage); (3) a segment with 0 orders in 1 session before and 900 in 1,000 after was `small_sample=False`
+  and significant at q = 0.0056 (Fisher's exact p is 0.10); (4) the zero-session padding property filtered out
+  every row it proposed, so it compared a frame with itself (0 rows added in 40 frames).
+- Decisions: the default test now treats days as the sampling units (ratio-estimator variance, Welch t),
+  which is the same method `confirm_change` uses, replacing the estimated-dispersion adjustment. Measured
+  calibration across 3-28 days and three levels of day-level noise: 3.1%-5.7% rejections at a nominal 5%
+  (the old method reached 7.2%; the plain test 34%). Sparse segments (any expected cell count below 5) get no
+  p-value, q-value or significance and are left out of the FDR family; Fisher's p is shown for information.
+  The localization is now a search over combinations (exhaustive up to 12 groups per partition) rather than
+  a check of the ranked prefix, and "broad shift" is only said after an exhaustive search. API changes in this
+  unmerged PR: `dispersion` became `inference`; `two_proportion` on the test became `binomial`/`day_level`;
+  `q_value` can be `None`.
+- Mistakes of mine caught while fixing: an expected-value slip in a hand calculation (orders are whole
+  numbers, so a nominal 2.6% became 16/600), a test that expected the wider of two equally small sets, and an
+  over-tight lower bound on a calibration test where being conservative is the safe direction.
+- Results: `.venv/bin/python -m pytest -q` passed (390 tests, 167 s on a slow run of the sandbox);
+  `.venv/bin/python -m ruff check causelens tests` passed. A further 600 fresh random frames found no violation of closure,
+  row-order invariance, relabeling, padding equivalence, the brute-force local set or the reliability rule.
+- The `Stop` hook still has no execution record; these results come from running the commands directly.

@@ -21,6 +21,7 @@ from causelens.analytics.decompose import (
     PartitionResult,
     SegmentEffect,
     benjamini_hochberg,
+    day_level_test,
     decompose_change,
     two_proportion_test,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "benjamini_hochberg",
     "check_data_quality",
     "confirm_change",
+    "day_level_test",
     "decompose_change",
     "detect_change_point",
     "load_events",

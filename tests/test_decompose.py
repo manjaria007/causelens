@@ -59,7 +59,7 @@ def test_pure_traffic_mix_shift_has_only_mix_effects():
     assert a.share_change_pp == pytest.approx(-25.0) and b.share_change_pp == pytest.approx(25.0)
     # rates did not change, so no segment is flagged and there is no p-value below 1
     assert a.test.significant is False and b.test.significant is False
-    assert a.test.two_proportion.p_value == pytest.approx(1.0)
+    assert a.test.p_value == pytest.approx(1.0)
 
 
 def test_pure_rate_change_has_only_a_rate_effect():
@@ -322,7 +322,7 @@ def test_localization_is_computed_and_agrees_with_the_planted_segment(ref, groun
 
 def test_planted_segment_interval_covers_the_planted_rate_change(ref, ground_truth):
     truth = ground_truth["planted_cause"]["true_effect_in_segment_pp"]
-    ci = part(ref, "device × browser").segments[0].test.two_proportion.change_pp
+    ci = part(ref, "device × browser").segments[0].test.change_pp
     assert ci.lower <= truth <= ci.upper and ci.level == 0.95
 
 
@@ -350,7 +350,7 @@ def test_fdr_info_and_separate_q_values_are_reported(ref):
 
 
 def test_q_values_equal_an_independent_bh_over_the_scan_and_per_partition(ref):
-    tested = [(p.name, s) for p in ref.partitions for s in p.segments if s.test is not None]
+    tested = [(p.name, s) for p in ref.partitions for s in p.segments if s.test is not None and s.test.reliable]
     ps = [s.test.p_value for _, s in tested]
     expected = multipletests(ps, method="fdr_bh")[1]
     assert np.allclose([s.test.q_value_scan for _, s in tested], expected, rtol=1e-9, atol=1e-300)
@@ -371,33 +371,69 @@ def test_partition_family_switches_the_primary_q_value(reference, ref):
     assert ref.change_pp == r.change_pp  # the accounting does not depend on the testing family
 
 
-def test_dispersion_adjustment_is_recomputed_independently_for_one_segment(reference, ref):
+def test_segment_test_is_recomputed_independently_from_daily_counts(reference, ref):
+    """Days are the sampling units: rebuild one segment's day-level test with plain numpy from the raw rows."""
+    from scipy import stats as sp
+
     metrics, _ = reference
     d = metrics.assign(date=pd.to_datetime(metrics["date"]))
-    d = d[(d["device"] == "mobile") & (d["browser"] == "safari") & (d["date"] != "2026-09-20")]
+    d = d[(d["device"] == "mobile") & (d["browser"] == "safari")]
     daily = d.groupby("date")[["sessions", "orders"]].sum()
-    post = daily.loc["2026-10-14":"2026-10-31"]
-    p = post["orders"].sum() / post["sessions"].sum()
-    chi2 = (((post["orders"] - post["sessions"] * p) ** 2) / (post["sessions"] * p * (1 - p))).sum()
-    expected = max(1.0, chi2 / (len(post) - 1))
-    t = seg(ref, "device × browser", "device=mobile, browser=safari").test.two_proportion
-    assert t.dispersion_post == pytest.approx(expected) and t.dispersion_post > 1
-    assert t.p_value >= t.p_value_binomial
-    for pr in ref.partitions:
-        for s in pr.segments:
+
+    def window(start, end):
+        days = pd.date_range(start, end)
+        days = days[days != pd.Timestamp("2026-09-20")]  # the day Task 2 excluded, for every segment
+        got = daily.reindex(days).fillna(0.0)
+        return got["sessions"].to_numpy(), got["orders"].to_numpy()
+
+    s0, o0 = window(*PRE)
+    s1, o1 = window(*POST)
+    r0, r1 = o0.sum() / s0.sum(), o1.sum() / s1.sum()
+    v0 = len(s0) / (len(s0) - 1) * np.sum((o0 - r0 * s0) ** 2) / s0.sum() ** 2
+    v1 = len(s1) / (len(s1) - 1) * np.sum((o1 - r1 * s1) ** 2) / s1.sum() ** 2
+    se, df = np.sqrt(v0 + v1), (v0 + v1) ** 2 / (v0**2 / (len(s0) - 1) + v1**2 / (len(s1) - 1))
+    t = seg(ref, "device × browser", "device=mobile, browser=safari").test
+    assert t.basis == "day_level_welch_t" and t.reliable and t.note is None
+    assert t.day_level.t_statistic == pytest.approx((r1 - r0) / se) and t.day_level.degrees_of_freedom == pytest.approx(df)
+    assert t.p_value == pytest.approx(2 * sp.t.sf(abs(r1 - r0) / se, df), rel=1e-6)
+    crit = sp.t.ppf(0.975, df)
+    assert t.change_pp.lower == pytest.approx(100 * (r1 - r0 - crit * se)) and t.change_pp.upper == pytest.approx(100 * (r1 - r0 + crit * se))
+    assert (t.day_level.n_days_pre, t.day_level.n_days_post) == (len(s0), len(s1))
+    assert t.day_level.design_effect_post > 1  # sessions are not independent trials: the plain test was optimistic
+
+
+def test_every_reliable_segment_reports_its_basis_and_the_plain_p_value_for_comparison(ref):
+    for p in ref.partitions:
+        for s in p.segments:
             if s.test is not None:
-                assert s.test.two_proportion.dispersion_pre >= 1 and s.test.two_proportion.dispersion_post >= 1
+                assert s.test.reliable and s.test.basis == "day_level_welch_t" and s.test.p_value is not None
+                assert 0 <= s.test.binomial.p_value <= 1 and s.test.q_value is not None
+                assert s.test.day_level.design_effect_pre is None or s.test.day_level.design_effect_pre > 0
 
 
-def test_without_dispersion_adjustment_the_plain_binomial_test_is_used(reference):
+def test_inference_binomial_uses_the_plain_test_and_says_it_is_optimistic(reference, ref):
     metrics, events = reference
-    r = decompose_change(metrics, PRE, POST, events, dispersion="none")
+    r = decompose_change(metrics, PRE, POST, events, inference="binomial")
+    assert r.inference == "binomial"
     for p in r.partitions:
         for s in p.segments:
             if s.test is not None:
-                tp = s.test.two_proportion
-                assert tp.p_value == tp.p_value_binomial and tp.dispersion_pre == tp.dispersion_post == 1.0
-    assert "no dispersion adjustment" in r.summary and any("optimistic" in a for a in r.assumptions)
+                assert s.test.basis == "binomial_z" and s.test.day_level is None
+                assert s.test.p_value == s.test.binomial.p_value
+                assert s.test.note and "optimistic" in s.test.note
+    assert any("optimistic" in a for a in r.assumptions) and "plain binomial" in r.summary
+    assert r.change_pp == ref.change_pp  # accounting does not depend on the test
+
+
+def test_one_day_windows_fall_back_to_the_plain_test_and_say_so():
+    df = segmented([
+        {"device": "desktop", "sessions": (1000, 1000), "rate": (0.04, 0.03)},
+        {"device": "mobile", "sessions": (1000, 1000), "rate": (0.02, 0.02)},
+    ], n_days=2, split=1)
+    r = decompose_change(df, (day(0), day(0)), (day(1), day(1)), min_days_per_window=1)
+    t = seg(r, "device", "device=desktop").test
+    assert t.basis == "binomial_z" and t.reliable and "fewer than 2 days" in t.note
+    assert any("fewer than 2 days" in a for a in r.assumptions)
 
 
 # ------------------------------------------------------------------ exclusions and windows are disclosed
@@ -480,7 +516,7 @@ def test_dimension_subsets_and_pair_switch(reference):
         ({"explain_threshold": 0.0}, "explain_threshold"),
         ({"explain_threshold": 1.5}, "explain_threshold"),
         ({"fdr_family": "global"}, "fdr_family"),
-        ({"dispersion": "robust"}, "dispersion"),
+        ({"inference": "robust"}, "inference"),
         ({"min_days_per_window": 0}, "min_days_per_window"),
     ],
 )
@@ -536,3 +572,175 @@ def test_analytics_source_contains_no_planted_answer():
     for needle in ("safari", "mobile", "desktop", "tablet", "Checkout", "Homepage", "ground_truth"):
         assert needle.lower() not in code.lower(), needle
     assert not re.search(r"20\d\d-\d\d-\d\d", code)
+
+
+# ------------------------------------------------------------------ PR #4 review regressions
+# Finding 1: a failed greedy selection must not be reported as a broad shift.
+
+
+def _desktop_ranks_first_but_mobile_is_narrower():
+    """Desktop (60% of traffic) has the largest contribution; mobile alone (30%) has 86% of the change;
+    tablet moves the other way. Numbers are exact so the contributions can be checked by hand."""
+    return segmented([
+        {"device": "desktop", "sessions": (600, 600), "rate": (0.05, 0.026)},
+        {"device": "mobile", "sessions": (300, 300), "rate": (0.05, 0.01)},
+        {"device": "tablet", "sessions": (100, 100), "rate": (0.03, 0.15)},
+    ])
+
+
+def _hand_contributions():
+    """Independent shift-share arithmetic with plain Python (no use of decompose_change).
+
+    Orders are whole numbers per day, so desktop's after-rate is 16/600, not the nominal 0.026."""
+    pre = {"desktop": (0.6, 30 / 600), "mobile": (0.3, 15 / 300), "tablet": (0.1, 3 / 100)}
+    post = {"desktop": (0.6, 16 / 600), "mobile": (0.3, 3 / 300), "tablet": (0.1, 15 / 100)}
+    r0 = sum(w * r for w, r in pre.values())
+    r1 = sum(w * r for w, r in post.values())
+    r_bar = (r0 + r1) / 2
+    out = {}
+    for name, (w0, a) in pre.items():
+        w1, b = post[name]
+        out[name] = 100 * ((w0 + w1) / 2 * (b - a) + (w1 - w0) * ((a + b) / 2 - r_bar))
+    return 100 * (r1 - r0), out
+
+
+def test_a_qualifying_combination_is_found_when_the_top_ranked_set_is_too_broad():
+    r = decompose_change(_desktop_ranks_first_but_mobile_is_narrower(), W_PRE, W_POST, dimensions=["device"], include_pairs=False)
+    change, hand = _hand_contributions()
+    p = part(r, "device")
+    for s in p.segments:
+        assert s.contribution_pp == pytest.approx(hand[s.label.split("=")[1]], abs=1e-9)
+    assert r.change_pp == pytest.approx(change)
+    ranked = p.explaining_set
+    assert ranked.kind == "ranked_prefix" and ranked.segments == ["device=desktop"]
+    assert ranked.traffic_share_post == pytest.approx(0.6)  # fails the 50% limit
+    local = p.local_set
+    assert local.kind == "traffic_limited_search" and local.segments == ["device=mobile"]
+    assert local.traffic_share_post == pytest.approx(0.3) and local.selected_share_of_change >= 0.8
+    assert p.local_search_exhaustive and p.local_set_unavailable_reason is None
+    assert r.localization.segments == ["device=mobile"] and r.localization_note is None
+    assert "spread across traffic" not in r.summary and "broad shift" not in r.summary
+
+
+def test_localization_does_not_depend_on_which_segment_ranks_first():
+    base = decompose_change(_desktop_ranks_first_but_mobile_is_narrower(), W_PRE, W_POST, dimensions=["device"], include_pairs=False)
+    swapped = segmented([
+        {"device": "mobile", "sessions": (600, 600), "rate": (0.05, 0.026)},
+        {"device": "desktop", "sessions": (300, 300), "rate": (0.05, 0.01)},
+        {"device": "tablet", "sessions": (100, 100), "rate": (0.03, 0.15)},
+    ])
+    other = decompose_change(swapped, W_PRE, W_POST, dimensions=["device"], include_pairs=False)
+    assert base.localization.segments == ["device=mobile"] and other.localization.segments == ["device=desktop"]
+    assert base.localization.traffic_share_post == other.localization.traffic_share_post
+
+
+def test_the_traffic_limit_decides_between_qualifying_combinations():
+    df = _desktop_ranks_first_but_mobile_is_narrower()
+    loose = decompose_change(df, W_PRE, W_POST, dimensions=["device"], include_pairs=False, max_localized_traffic_share=0.7)
+    # desktop (60%) and mobile (30%) now both qualify with one segment; the narrower one is preferred
+    assert loose.partitions[0].explaining_set.segments == ["device=desktop"]
+    assert loose.partitions[0].local_set.segments == ["device=mobile"]
+    tight = decompose_change(df, W_PRE, W_POST, dimensions=["device"], include_pairs=False, max_localized_traffic_share=0.2)
+    assert tight.localization is None and "broad shift" in tight.localization_note
+    assert "every combination" in tight.localization_note and tight.partitions[0].local_search_exhaustive
+
+
+def test_broad_shift_is_only_claimed_when_the_search_was_exhaustive():
+    df = segmented([
+        {"browser": b, "channel": c, "sessions": (1000 + 7 * i, 1000 + 7 * i), "rate": (0.04, 0.03)}
+        for i, (b, c) in enumerate((b, c) for b in ["b1", "b2", "b3", "b4"] for c in ["c1", "c2", "c3", "c4"])
+    ])
+    r = decompose_change(df, W_PRE, W_POST, dimensions=["browser", "channel"])
+    pair = part(r, "browser × channel")
+    assert pair.n_segments == 16 and not pair.local_search_exhaustive and pair.local_set is None
+    assert "largest positive contributors" in pair.local_set_unavailable_reason
+    assert r.localization is None
+    assert "does not by itself establish a broad shift" in r.localization_note
+    assert "consistent with a broad shift" not in r.localization_note
+
+
+def test_ranked_prefix_is_still_the_smallest_set_without_a_traffic_limit():
+    r = decompose_change(_desktop_ranks_first_but_mobile_is_narrower(), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, max_localized_traffic_share=1.0)
+    p = part(r, "device")
+    # with no effective limit the ranked prefix is feasible, so the search cannot need more segments than it
+    assert p.explaining_set.k == 1 and p.local_set.k == p.explaining_set.k
+    assert p.explaining_set.segments == ["device=desktop"] and p.local_set.traffic_share_post <= p.explaining_set.traffic_share_post
+
+
+# Finding 3: sparse arms must not be reported as significant.
+
+
+def _sparse_arm_frame():
+    """Mobile: 0 orders in 1 session before, 900 in 1,000 after. Desktop: large and unchanged."""
+    desktop = segmented([{"device": "desktop", "sessions": (1000, 1000), "rate": (0.03, 0.03)}])
+    pre = pd.DataFrame([{**desktop.iloc[0].to_dict(), "device": "mobile", "sessions": 1, "orders": 0}])
+    post_days = pd.date_range(day(14), periods=10).strftime("%Y-%m-%d")
+    post = pd.DataFrame([{**desktop.iloc[0].to_dict(), "device": "mobile", "date": d, "sessions": 100, "orders": 90}
+                         for d in post_days])
+    return pd.concat([desktop, pre, post], ignore_index=True)
+
+
+def test_a_segment_with_a_sparse_arm_gets_no_significance_claim():
+    """Previously small_sample=False and q = 0.0056; Fisher's exact p is 0.10."""
+    from scipy import stats as sp
+
+    r = decompose_change(_sparse_arm_frame(), W_PRE, W_POST, dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    m = seg(r, "device", "device=mobile")
+    assert (m.sessions_pre, m.orders_pre, m.sessions_post, m.orders_post) == (1, 0, 1000, 900)
+    t = m.test
+    assert t is not None and not t.reliable and t.basis == "none" and t.day_level is None
+    assert t.p_value is None and t.q_value is None and t.q_value_scan is None and t.q_value_partition is None
+    assert t.significant is False
+    assert t.p_value_exact == pytest.approx(sp.fisher_exact([[0, 1], [900, 100]]).pvalue) == pytest.approx(0.100899, abs=1e-5)
+    assert t.binomial.small_sample and t.binomial.p_value < 0.01  # the approximation that would have misled
+    assert "Too sparse" in t.note and "No significance is claimed" in t.note and "information only" in t.note
+
+
+def test_sparse_segments_are_left_out_of_the_fdr_family_but_still_counted_in_the_accounting():
+    r = decompose_change(_sparse_arm_frame(), W_PRE, W_POST, dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    p = part(r, "device")
+    assert p.n_unreliable == 1 and p.n_tests == 1 and r.n_unreliable_tests >= 1
+    assert r.n_tests_scanned == sum(q.n_tests for q in r.partitions)
+    reliable = [s for q in r.partitions for s in q.segments if s.test is not None and s.test.reliable]
+    expected = multipletests([s.test.p_value for s in reliable], method="fdr_bh")[1]
+    assert np.allclose([s.test.q_value_scan for s in reliable], expected)
+    assert p.reconciles and seg(r, "device", "device=mobile").contribution_pp != 0  # its movement is still accounted for
+    assert any("too sparse" in a for a in r.assumptions) and "sparse segment(s) were not tested" in r.summary
+    assert p.rate_effect_significant_pp == pytest.approx(
+        sum(s.rate_effect_pp for s in p.segments if s.test is not None and s.test.significant)
+    )
+
+
+def test_a_sparse_segment_cannot_be_what_makes_a_localization_significant():
+    r = decompose_change(_sparse_arm_frame(), W_PRE, W_POST, dimensions=["device"], include_pairs=False,
+                         apply_exclusions=False, explain_threshold=0.5)
+    loc = r.localization
+    if loc is not None and "device=mobile" in loc.segments:
+        assert not loc.all_selected_significant
+        assert "no reliable test" in r.summary or "traffic-mix shift" in r.summary
+
+
+@pytest.mark.parametrize(("pre", "post"), [((1, 0), (1000, 900)), ((3, 1), (500, 40)), ((40, 0), (60, 3)), ((0, 0), (200, 0))])
+def test_the_reliability_rule_follows_the_smallest_expected_cell(pre, post):
+    s0, c0 = pre
+    s1, c1 = post
+    pooled = (c0 + c1) / (s0 + s1)
+    expected_min = min(s0 * pooled, s0 * (1 - pooled), s1 * pooled, s1 * (1 - pooled))
+    df = segmented([{"device": "desktop", "sessions": (2000, 2000), "rate": (0.03, 0.03)}])
+    extra = []
+    for sessions, orders, days in ((s0, c0, [day(0)]), (s1, c1, [day(14)])):
+        if sessions:
+            extra.append({**df.iloc[0].to_dict(), "device": "tiny", "date": days[0].isoformat(), "sessions": sessions, "orders": orders})
+    r = decompose_change(pd.concat([df, pd.DataFrame(extra)], ignore_index=True), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False)
+    tiny = seg(r, "device", "device=tiny")
+    if tiny.status == "both":
+        assert tiny.test.reliable == (expected_min >= 5)
+        assert tiny.test.binomial.expected_min_count == pytest.approx(expected_min)
+    else:
+        assert tiny.test is None  # present in one window only: nothing to test
+
+
+def test_reference_data_has_no_unreliable_segments(ref):
+    assert ref.n_unreliable_tests == 0 and all(p.n_unreliable == 0 for p in ref.partitions)
