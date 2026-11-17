@@ -16,10 +16,10 @@
   - [x] 3.3 Match plausible dates to event log candidates
   - _Requirements: 2.1–2.3, 3.1–3.3_
 
-- [ ] 4. Localization
-  - [ ] 4.1 `decompose_change` (rate/mix per segment, single dims and pairs)
-  - [ ] 4.2 Two-proportion tests with Benjamini–Hochberg adjustment
-  - [ ] 4.3 Property test: decomposition closes; invariance to row order and labels
+- [x] 4. Localization
+  - [x] 4.1 `decompose_change` (rate/mix per segment, single dims and pairs)
+  - [x] 4.2 Two-proportion tests with Benjamini–Hochberg adjustment
+  - [x] 4.3 Property test: decomposition closes; invariance to row order and labels
   - _Requirements: 4.1–4.5_
 
 - [ ] 5. Candidate testing and causal estimate

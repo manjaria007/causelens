@@ -138,3 +138,37 @@ For each task, record:
   confirmed 146/150.
 - A `Stop` hook execution record still does not exist (see the Hooks section on the
   `hook-pytest-on-stop` branch); these results come from running the commands directly.
+
+## Task 4: localization
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 4, subtasks
+  4.1-4.3) after reading the steering files, requirements, design and task plan, on a branch cut from
+  `main` after PR #3 was merged.
+- Code: `causelens/analytics/decompose.py` (`decompose_change`, `benjamini_hochberg`,
+  `two_proportion_test`). Method, parameters, measured behaviour and limits: `docs/localization.md`.
+- How the specification shaped the work: Requirement 4.3 and the design's "Decomposition closes" property
+  drove an exact shift-share identity, with the reconciliation shown per partition. The scientist rules
+  drove the output: effect sizes and intervals beside every p-value, FDR control stated, no causal
+  wording, and the unexplained part shown instead of forced to 100% (an explaining set can report 108%).
+- Specification interpretations (each documented): (1) rate and mix use midpoint weights, so the
+  rate x mix interaction is split evenly and there is no base-window choice; the "residual" is therefore
+  floating-point error only, and the genuinely unexplained part is reported separately as the rate effect
+  of segments not distinguishable from noise. (2) BH runs over every segment scanned across partitions by
+  default, with the within-partition q-value always reported too. (3) The two-proportion test carries a
+  quasi-binomial dispersion factor by default (the plain binomial p-value is reported beside it) because
+  day-level variation made the plain test optimistic. (4) "Smallest set that explains most of the change"
+  is per partition; the cross-partition `localization` needs a set that carries at most 50% of traffic.
+- Problems found by tests and fixed: a one-value partition (all traffic) was reported as where a pure
+  traffic-mix shift was concentrated, so a traffic limit and an explicit "broad shift" outcome were added; a
+  test that demanded no false discoveries in every dataset failed on one seed and was replaced by the
+  false-discovery-proportion statement FDR control actually makes (mean 0.020 over 30 seeds); the first
+  implementation was slow because of repeated pandas groupbys (0.375 s a call) and was rewritten with
+  integer codes and `bincount` (0.11 s), with every existing test unchanged; and a test's `query()` on a
+  datetime column silently did not filter, which a cross-check against `confirm_change` exposed.
+- Results: `.venv/bin/python -m pytest -q` passed (352 tests); `.venv/bin/python -m ruff check causelens
+  tests` passed. Task 4's own tests add about 27 s here. The whole suite took 70 s to 156 s on different
+  runs because the sandbox speed varies, so it can exceed the 120 s timeout of the (unverified) `Stop`
+  hook. The three headline properties (closure, row-order invariance, relabeling) also held on 1,200
+  further random draws, with a worst residual of 1.2e-14 pp.
+- The `Stop` hook still has no execution record (see the Hooks section on the `hook-pytest-on-stop`
+  branch); these results come from running the commands directly.

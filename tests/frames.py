@@ -69,3 +69,36 @@ def binomial_series(
 
 def day(i: int, start: str = START):
     return (pd.Timestamp(start) + pd.Timedelta(days=i)).date()
+
+
+DEFAULT_SEGMENT = {"device": "desktop", "browser": "chrome", "channel": "organic", "customer_type": "new"}
+
+
+def segmented(
+    segments: list[dict],
+    n_days: int = 28,
+    split: int = 14,
+    start: str = START,
+    noise_seed: int | None = None,
+) -> pd.DataFrame:
+    """Rows for several segments with hand-computable numbers.
+
+    Each spec gives any of the four dimensions (others default to ``DEFAULT_SEGMENT``), plus
+    ``sessions=(per_day_pre, per_day_post)`` and ``rate=(pre, post)``. Days before ``split`` use the
+    pre values. A zero session count drops the segment from that window. Orders are
+    ``round(sessions * rate)`` per day, or binomial when ``noise_seed`` is given.
+    """
+    rng = np.random.default_rng(noise_seed) if noise_seed is not None else None
+    days = pd.date_range(start, periods=n_days).strftime("%Y-%m-%d")
+    rows = []
+    for i, d in enumerate(days):
+        post = i >= split
+        for spec in segments:
+            sessions = spec["sessions"][1 if post else 0]
+            if sessions <= 0:
+                continue
+            rate = spec["rate"][1 if post else 0]
+            orders = int(rng.binomial(sessions, rate)) if rng is not None else round(sessions * rate)
+            rows.append({**DEFAULT_SEGMENT, **{k: spec[k] for k in DEFAULT_SEGMENT if k in spec},
+                         "date": d, "sessions": int(sessions), "orders": int(orders)})
+    return pd.DataFrame(rows)[["date", *DEFAULT_SEGMENT, "sessions", "orders"]]
