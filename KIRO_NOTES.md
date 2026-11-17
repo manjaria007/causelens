@@ -86,3 +86,55 @@ For each task, record:
 - Results: `.venv/bin/python -m pytest -q` passed (129 tests);
   `.venv/bin/python -m ruff check causelens tests` passed.
 - Hook activation in Kiro was not verified.
+
+## Task 3: confirm the change and locate it
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 3,
+  subtasks 3.1-3.3) after reading the steering files, requirements, design and task plan.
+- Code: `causelens/analytics/series.py` (daily series, Task 2 exclusions and their disclosure),
+  `confirm.py` (`confirm_change`), `changepoint.py` (`detect_change_point`,
+  `match_event_candidates`). Methods, parameters, measured behaviour and limits are in
+  `docs/change-analysis.md`.
+- How the specification shaped the work: the scientist rules drove the result shapes (intervals and
+  sample sizes on every estimate, effect size beside every p-value, assumptions listed, no causal
+  wording) and the explicit insufficient-data and stop-investigation paths (Requirement 2.3).
+- Specification interpretations: (1) Requirement 3.3 says events "within the plausible range"; the
+  likelihood-ratio set alone excluded an event one day before the earliest plausible date, so a
+  documented `lead_days` look-back (default 3) lists events shortly before the range, tagged
+  `precedes_range_within_lead`, with `lead_days=0` giving the strict reading. (2) The design's
+  "binary segmentation / CUSUM" is implemented as an exhaustive single-split search, equivalent for
+  one change point; multiple change points are not modelled. (3) Weekday factors are estimated
+  jointly with the shift rather than from raw weekday means, which a shift would bias.
+- Bugs found by tests and fixed: an overflow for extremely small `alpha` (now bounded), float
+  rounding noise defeating a zero-variance check, and a crash formatting the summary when a
+  perfect step leaves no residual noise.
+- Measured limits (see the docs): the plausible set covers the true date about 96% of the time for a
+  15% step but only about 87% for an 8% step, so it is approximate.
+- Results: `.venv/bin/python -m pytest -q` passed (215 tests, about 60 s);
+  `.venv/bin/python -m ruff check causelens tests` passed. Task 3 is checked off in `tasks.md`
+  on this branch only; PR #3 is open and unmerged, and Task 4 has not been started.
+- Hook status (see the Hooks section on the `hook-pytest-on-stop` branch): the `Stop` hook is
+  unverified, and no hook execution record exists for this task. These results come from running
+  the commands directly, not from a hook.
+
+### Task 3 review round (PR #3, review supplied by the user)
+
+- Six findings, all reproduced before fixing, each with focused regression tests that were checked
+  to fail on the previous commit (`f803714`): (1) constant data reported a certain change because
+  split costs were computed without centring, so float residue looked like signal; (2) zero-conversion
+  series crashed in weekday adjustment; (3) the pooled-rate estimate and the daily-mean t-test,
+  effect size and power targeted different quantities; (4) relative intervals silently dropped
+  zero-denominator bootstrap draws; (5) custom confidence levels were always labelled "95% CI";
+  (6) valid maximum-count rows overflowed int64 when summed.
+- Decisions: the test now targets the pooled rate (ratio-estimator variance) so estimate, interval,
+  test, effect size and power agree; the relative interval is withheld (with the reason) when it is
+  unbounded rather than approximated; constant series return "no change point exists"; and the
+  loader rejects aggregates above 2**53 - 1 with a typed error. The last one changes the Task 2
+  loader's contract (total, not just per-row), which is documented in `docs/data-quality.md`.
+  `welch_significant` was renamed `test_significant` because the test is no longer a plain Welch test
+  on daily means.
+- Results: `.venv/bin/python -m pytest -q` passed (262 tests); `.venv/bin/python -m ruff check
+  causelens tests` passed. Re-measured: null `confirm_change` false positives 5/150, a 5% drop
+  confirmed 146/150.
+- A `Stop` hook execution record still does not exist (see the Hooks section on the
+  `hook-pytest-on-stop` branch); these results come from running the commands directly.

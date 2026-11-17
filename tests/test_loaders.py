@@ -180,8 +180,8 @@ def test_counts_beyond_exact_range_are_rejected_not_wrapped(value):
 
 def test_largest_exact_count_is_accepted_and_stays_positive():
     top = 2**53 - 1
-    out = validate_metrics(_with(sessions=[top, 200], orders=[10, 10]))
-    assert out["sessions"].max() == top and (out["sessions"] > 0).all()
+    out = validate_metrics(_with(sessions=[top, 0], orders=[10, 0]))
+    assert out["sessions"].max() == top and (out["sessions"] >= 0).all()
 
 
 def test_infinite_count_is_rejected():
@@ -335,7 +335,8 @@ def test_non_string_counts_must_be_exactly_whole_numbers(value):
     ],
 )
 def test_exactly_whole_counts_are_accepted_unchanged(value, expected):
-    frame = _with(orders=[1, 10]).astype({"sessions": object})
+    # The other row is zero so the *total* stays within the aggregate limit even at the maximum count.
+    frame = _with(sessions=[0, 0], orders=[0, 0]).astype({"sessions": object})
     frame.loc[0, "sessions"] = value
     out = validate_metrics(frame)
     assert out.loc[out["date"] == "2026-08-02", "sessions"].iloc[0] == expected
@@ -419,3 +420,46 @@ def test_quoted_commas_and_escaped_quotes_still_load(tmp_path):
     events = load_events(path)
     assert events["name"].iloc[0] == "Tag deploy, v2"
     assert events["description"].iloc[0] == 'said "rolled back"'
+
+
+# ------------------------------------------------------------------ aggregate overflow (PR #3 review)
+
+TOP = 2**53 - 1
+
+
+def _many_rows(n: int, sessions: int, orders: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "date": ["2026-08-01"] * n,
+            "device": "d",
+            "browser": "b",
+            "channel": [f"c{i}" for i in range(n)],
+            "customer_type": "n",
+            "sessions": sessions,
+            "orders": orders,
+        }
+    )
+
+
+def test_aggregate_of_valid_rows_that_would_wrap_int64_is_rejected():
+    """1,025 rows at the per-count maximum sum past 2**63 and used to wrap negative downstream."""
+    with pytest.raises(DataValidationError, match="total sessions across all rows .* exceeds the supported aggregate maximum"):
+        validate_metrics(_many_rows(1025, TOP, TOP))
+
+
+def test_aggregate_one_over_the_limit_is_rejected_and_exactly_at_the_limit_is_accepted():
+    over = _many_rows(2, TOP, 0)
+    over.loc[1, "sessions"] = 1
+    with pytest.raises(DataValidationError, match=r"total sessions across all rows \(9007199254740992\)"):
+        validate_metrics(over)
+    at_limit = _many_rows(2, TOP, 0)
+    at_limit.loc[1, "sessions"] = 0
+    assert validate_metrics(at_limit)["sessions"].sum() == TOP
+
+
+def test_aggregate_check_is_exact_beyond_float_precision():
+    """Totals above 2**53 cannot be compared reliably as floats; the check uses exact integers."""
+    frame = _many_rows(3, TOP, 0)
+    frame["sessions"] = [TOP, TOP, 1]
+    with pytest.raises(DataValidationError, match=r"\(18014398509481983\)"):
+        validate_metrics(frame)
