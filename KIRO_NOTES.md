@@ -28,6 +28,26 @@ written by other tools to Kiro.
 - Hook JSON and representative matching/nonmatching paths were checked directly.
   git diff --check passed. These checks do not establish that Kiro fired the hook.
 
+## Hooks
+
+- **Replacement hook added:** `.kiro/hooks/pytest-on-stop.json` (trigger `Stop`, command hook,
+  timeout 120 s). It runs `.venv/bin/python -m pytest -q` from the repository root (it changes
+  directory itself, because the Web workspace root is the parent of the repository) and appends a
+  timestamped start/end record with the pytest exit code to `.pytest_cache/stop-hook-runs.log`
+  (git-ignored). It always exits 0 so it can never block the agent from stopping.
+- **Execution NOT verified.** Kiro reported that the hook becomes active on the *next session
+  start*, and a `Stop` hook fires when the agent finishes a turn, so no automatic execution record
+  could exist in the session that created it. The only run so far was a manual dry run of the
+  same command against a scratch log (215 passed in 62 s). That is not an execution record and is
+  not counted as verification.
+- **`pytest-on-save` is still present** and has not been removed, because the replacement is
+  unverified. Its own activation was never verified either: no hook output appeared across many
+  saves of Python files under `causelens/` in Web sessions.
+- **How to verify:** start a new session, let the agent finish a turn, then check that
+  `.pytest_cache/stop-hook-runs.log` has a "stop hook start/end" pair timestamped after that turn.
+  Only then remove `.kiro/hooks/pytest-on-save.json` and update this section.
+- The suite takes about a minute, so the hook adds that to the end of every agent turn.
+
 ## Sequential task workflow
 
 Start each parent task in .kiro/specs/metric-investigation/tasks.md, complete its
