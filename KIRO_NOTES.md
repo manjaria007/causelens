@@ -106,3 +106,9 @@ For each task, record:
   perfect step leaves no residual noise.
 - Measured limits (see the docs): the plausible set covers the true date about 96% of the time for a
   15% step but only about 87% for an 8% step, so it is approximate.
+- Results: `.venv/bin/python -m pytest -q` passed (215 tests, about 60 s);
+  `.venv/bin/python -m ruff check causelens tests` passed. Task 3 is checked off in `tasks.md`
+  on this branch only; PR #3 is open and unmerged, and Task 4 has not been started.
+- Hook status (see the Hooks section on the `hook-pytest-on-stop` branch): the `Stop` hook is
+  unverified, and no hook execution record exists for this task. These results come from running
+  the commands directly, not from a hook.
