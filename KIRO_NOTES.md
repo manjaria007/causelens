@@ -138,3 +138,97 @@ For each task, record:
   confirmed 146/150.
 - A `Stop` hook execution record still does not exist (see the Hooks section on the
   `hook-pytest-on-stop` branch); these results come from running the commands directly.
+
+## Task 4: localization
+
+- Implemented in this session from `.kiro/specs/metric-investigation/tasks.md` (Task 4, subtasks
+  4.1-4.3) after reading the steering files, requirements, design and task plan, on a branch cut from
+  `main` after PR #3 was merged.
+- Code: `causelens/analytics/decompose.py` (`decompose_change`, `benjamini_hochberg`,
+  `two_proportion_test`). Method, parameters, measured behaviour and limits: `docs/localization.md`.
+- How the specification shaped the work: Requirement 4.3 and the design's "Decomposition closes" property
+  drove an exact shift-share identity, with the reconciliation shown per partition. The scientist rules
+  drove the output: effect sizes and intervals beside every p-value, FDR control stated, no causal
+  wording, and the unexplained part shown instead of forced to 100% (an explaining set can report 108%).
+- Specification interpretations (each documented): (1) rate and mix use midpoint weights, so the
+  rate x mix interaction is split evenly and there is no base-window choice; the "residual" is therefore
+  floating-point error only, and the genuinely unexplained part is reported separately as the rate effect
+  of segments not distinguishable from noise. (2) BH runs over every segment scanned across partitions by
+  default, with the within-partition q-value always reported too. (3) The two-proportion test carries a
+  quasi-binomial dispersion factor by default (the plain binomial p-value is reported beside it) because
+  day-level variation made the plain test optimistic. (4) "Smallest set that explains most of the change"
+  is per partition; the cross-partition `localization` needs a set that carries at most 50% of traffic.
+- Problems found by tests and fixed: a one-value partition (all traffic) was reported as where a pure
+  traffic-mix shift was concentrated, so a traffic limit and an explicit "broad shift" outcome were added; a
+  test that demanded no false discoveries in every dataset failed on one seed and was replaced by the
+  false-discovery-proportion statement FDR control actually makes (mean 0.020 over 30 seeds); the first
+  implementation was slow because of repeated pandas groupbys (0.375 s a call) and was rewritten with
+  integer codes and `bincount` (0.11 s), with every existing test unchanged; and a test's `query()` on a
+  datetime column silently did not filter, which a cross-check against `confirm_change` exposed.
+- Results: `.venv/bin/python -m pytest -q` passed (352 tests); `.venv/bin/python -m ruff check causelens
+  tests` passed. Task 4's own tests add about 27 s here. The whole suite took 70 s to 156 s on different
+  runs because the sandbox speed varies, so it can exceed the 120 s timeout of the (unverified) `Stop`
+  hook. The three headline properties (closure, row-order invariance, relabeling) also held on 1,200
+  further random draws, with a worst residual of 1.2e-14 pp.
+- The `Stop` hook still has no execution record (see the Hooks section on the `hook-pytest-on-stop`
+  branch); these results come from running the commands directly.
+
+### Task 4 review round (PR #4, review supplied by the user)
+
+- Four findings, each reproduced on commit `64e0cf8` before fixing, with regression tests checked against
+  the previous behaviour on the exact fixtures: (1) when the top-ranked set failed the 50% traffic limit the
+  output said "spread across traffic" although a narrower combination qualified (86% of the change on 30% of
+  traffic); (2) an estimated quasi-binomial dispersion was treated as known, rejecting 7.2% of true nulls at a
+  nominal 5% with seven days per window (my own run of the reviewer's setting: 7.2%, 92.7% interval
+  coverage); (3) a segment with 0 orders in 1 session before and 900 in 1,000 after was `small_sample=False`
+  and significant at q = 0.0056 (Fisher's exact p is 0.10); (4) the zero-session padding property filtered out
+  every row it proposed, so it compared a frame with itself (0 rows added in 40 frames).
+- Decisions: the default test now treats days as the sampling units (ratio-estimator variance, Welch t),
+  which is the same method `confirm_change` uses, replacing the estimated-dispersion adjustment. Measured
+  calibration across 3-28 days and three levels of day-level noise: 3.1%-5.7% rejections at a nominal 5%
+  (the old method reached 7.2%; the plain test 34%). Sparse segments (any expected cell count below 5) get no
+  p-value, q-value or significance and are left out of the FDR family; Fisher's p is shown for information.
+  The localization is now a search over combinations (exhaustive up to 12 groups per partition) rather than
+  a check of the ranked prefix, and "broad shift" is only said after an exhaustive search. API changes in this
+  unmerged PR: `dispersion` became `inference`; `two_proportion` on the test became `binomial`/`day_level`;
+  `q_value` can be `None`.
+- Mistakes of mine caught while fixing: an expected-value slip in a hand calculation (orders are whole
+  numbers, so a nominal 2.6% became 16/600), a test that expected the wider of two equally small sets, and an
+  over-tight lower bound on a calibration test where being conservative is the safe direction.
+- Results: `.venv/bin/python -m pytest -q` passed (390 tests, 167 s on a slow run of the sandbox);
+  `.venv/bin/python -m ruff check causelens tests` passed. A further 600 fresh random frames found no violation of closure,
+  row-order invariance, relabeling, padding equivalence, the brute-force local set or the reliability rule.
+- The `Stop` hook still has no execution record; these results come from running the commands directly.
+
+### Task 4 review round 2 (PR #4, review supplied by the user)
+
+- Three findings, each reproduced on commit `00c96ba` before fixing, and their fixtures re-run against the
+  old code for the regression record: (1) a segment seen on one day per window (100 sessions / 10 orders
+  before, 100 / 11 after) was reported with 14 days per window, p = q = 0 and the interval [1.0, 1.0]; (2) two
+  segments with identical pooled counts but different daily variability were grouped into one block, so a
+  localization that qualified on 39% of traffic was missed and the change was called broad; (3)
+  `day_level_test` accepted NaN and returned NaN estimates and p-values.
+- A related defect found while fixing (2), not in the review: two identical segments that each qualify alone
+  were also forced together (77% of traffic), so the same wrong "broad shift" appeared. The search now selects
+  by number from each group of interchangeable segments, so this no longer happens.
+- Decisions: (1) days with sessions are the sampling units, a segment needs 3 in each window or the test is
+  withheld (no optimistic fallback; `inference="binomial"` stays an explicit choice), and the day-level
+  variance is floored at the binomial variance so a few similar days cannot give zero variance (the floor uses
+  a half-observation-shrunk rate so a window with no orders still has an interval). Measured: 2.3%-5.6%
+  rejections at a nominal 5% across 3-28 days and no to heavy day-level noise; with the floor treated as a
+  bound (no estimation uncertainty) the test is no longer needlessly conservative on clean data. (2) Segments
+  are interchangeable only with identical counts and the same significance, and a group is searched by number
+  of members. (3) Every public helper rejects non-finite, fractional and impossible inputs before calculating.
+- A correction to my own previous round: `docs/localization.md` had lost most of its sections (161 lines at the
+  first commit, 89 at `00c96ba`). A script that replaced everything from the first `## Tests` heading also
+  matched `## Tests and FDR (4.4)` and deleted the sections after it, including the ones just written for the
+  previous review. The document is rebuilt in full for the final behaviour.
+- Mistakes of mine caught while fixing: a hand-built fixture with the wrong direction of change, a chained
+  `approx` comparison, an assertion that the ranked prefix holds one segment when it holds both tied ones (the
+  documented behaviour), and a vacuous `or ... >= 1` clause. The Hypothesis frames rarely produce exact twin
+  segments, so a dedicated twin-frame strategy checks partial selection against a brute-force search.
+- Results: `.venv/bin/python -m pytest -q` passed (430 tests, 175 s on a slow run of the sandbox);
+  `.venv/bin/python -m ruff check causelens tests` passed. A further 400 fresh random frames (half with twin
+  segments) found no violation of closure, row-order invariance, relabeling, padding equivalence, the
+  brute-force local set or the reliability rule.
+- The `Stop` hook still has no execution record; these results come from running the commands directly.
