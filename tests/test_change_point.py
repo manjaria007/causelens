@@ -4,10 +4,11 @@ import itertools
 from datetime import date
 
 import numpy as np
+import pandas as pd
 import pytest
 from frames import WEEKDAY_CONV, bounded_series, day, to_frame
 
-from causelens.analytics import detect_change_point
+from causelens.analytics import detect_change_point, match_event_candidates
 
 
 @pytest.fixture(scope="module")
@@ -187,3 +188,104 @@ def test_result_is_deterministic_and_row_order_invariant(reference):
     a = detect_change_point(metrics, events)
     assert a.model_dump() == detect_change_point(metrics, events).model_dump()
     assert a.model_dump() == detect_change_point(shuffled, events).model_dump()
+
+
+# ------------------------------------------------------------------ PR #3 review regressions
+# Finding 1: constant data must never produce a "certain" change.
+
+
+def _constant(n: int, sessions: int, orders: int):
+    return to_frame(np.full(n, sessions), np.full(n, orders))
+
+
+@pytest.mark.parametrize("adjust", [False, True])
+@pytest.mark.parametrize(
+    ("n", "sessions", "orders"),
+    [(20, 10_000, 300), (40, 10_000, 300), (60, 7, 3), (30, 10**9, 3 * 10**7), (30, 1, 1), (30, 12_345, 0)],
+)
+def test_constant_series_has_no_change_point_not_a_certain_one(n, sessions, orders, adjust):
+    """Previously 20 days of 10,000 sessions / 300 orders reported an increase with adjusted p = 0."""
+    r = detect_change_point(_constant(n, sessions, orders), adjust_weekdays=adjust)
+    assert r.status == "ok" and not r.change_detected
+    assert r.direction is None and r.best_date is None
+    assert r.plausible_dates == [] and r.plausible_range is None
+    assert r.p_value_adjusted == 1.0 and r.shift_in_residual_sd is None
+    assert "No change point exists" in r.summary and "no events are matched" in r.summary
+    assert r.n_days_used == n
+
+
+def test_constant_series_admits_no_event_candidates():
+    events = pd.DataFrame(
+        {"date": [day(8).isoformat()], "type": ["release"], "name": ["Unrelated release"], "scope": ["all"]}
+    )
+    r = detect_change_point(_constant(20, 10_000, 300))
+    m = match_event_candidates(r, events, lead_days=30)
+    assert m.status == "no_change_point" and m.candidates == []
+
+
+def test_series_that_is_constant_after_removing_the_weekday_pattern_is_not_a_change():
+    """Orders follow an exact weekday pattern (whole numbers), so the adjusted series is flat."""
+    weekday = np.array([1.02, 1.01, 1.00, 1.00, 0.98, 0.97, 0.99])
+    wd = pd.date_range("2026-08-01", periods=56).day_of_week.to_numpy()
+    orders = np.round(10_000 * 0.04 * weekday[wd]).astype(int)
+    assert len(set(orders.tolist())) > 1  # genuinely varies by weekday
+    r = detect_change_point(to_frame(np.full(56, 10_000), orders))
+    assert not r.change_detected and r.best_date is None and r.p_value_adjusted == 1.0
+
+
+def test_tiny_float_noise_around_a_constant_is_still_constant():
+    base = 3 * 10**8
+    r = detect_change_point(to_frame(np.full(40, 10**10), np.full(40, base)))
+    assert not r.change_detected
+
+
+# Finding 2: zero-conversion series must not crash.
+
+
+def test_all_zero_orders_is_a_constant_series_not_a_crash():
+    r = detect_change_point(to_frame(np.full(40, 10_000), np.zeros(40, dtype=int)))
+    assert not r.change_detected and r.best_date is None
+
+
+@pytest.mark.parametrize("before_after", [(0, 300), (300, 0)])
+def test_step_to_or_from_zero_orders_is_located_exactly(before_after):
+    before, after = before_after
+    r = detect_change_point(to_frame(np.full(40, 10_000), np.r_[np.full(20, before), np.full(20, after)]))
+    assert r.change_detected and r.best_date == day(20) and r.plausible_dates == [day(20)]
+    assert r.direction == ("increase" if after > before else "decrease")
+    assert not r.weekday_adjustment.applied
+    assert "fell back to no adjustment" in r.weekday_adjustment.reason and "zero" in r.weekday_adjustment.reason
+    assert "NaN" not in r.model_dump_json()
+
+
+def test_a_weekday_with_zero_orders_disables_adjustment_with_a_reason():
+    df = bounded_series(3, 70, step_day=35, step=-0.3)
+    sundays = pd.to_datetime(df["date"]).dt.day_of_week == 6
+    df.loc[sundays, "orders"] = 0
+    # Exclusions off: otherwise Task 2 flags and removes the zero days and adjustment is skipped
+    # for a different reason (too few Sundays), which would not reach the zero-factor path.
+    r = detect_change_point(df, apply_exclusions=False)
+    assert not r.weekday_adjustment.applied
+    assert "fell back to no adjustment" in r.weekday_adjustment.reason
+    assert "weekday's average conversion is zero" in r.weekday_adjustment.reason
+    assert r.status == "ok" and r.best_date is not None and "NaN" not in r.model_dump_json()
+
+
+@pytest.mark.parametrize("n", [14, 20, 28, 35])
+def test_every_short_or_long_zero_heavy_series_returns_a_result(n):
+    rng = np.random.default_rng(n)
+    orders = rng.choice([0, 0, 0, 5], size=n)
+    r = detect_change_point(to_frame(np.full(n, 100), orders))
+    assert r.status == "ok" and "NaN" not in r.model_dump_json()
+
+
+# Finding 5 (change-point side): the plausible level is labelled from its actual value.
+
+
+@pytest.mark.parametrize(("level", "label"), [(0.8, "80%"), (0.9, "90%"), (0.975, "97.5%"), (0.95, "95%")])
+def test_plausible_level_label_follows_the_requested_level(level, label):
+    r = detect_change_point(bounded_series(4, 80, step_day=45, step=-0.2), plausible_level=level)
+    assert any(f"approximate {label} likelihood-ratio set" in a for a in r.assumptions)
+    assert f"plausible at the {label} level" in r.summary
+    if label != "95%":
+        assert "95%" not in r.summary

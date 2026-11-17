@@ -117,3 +117,51 @@ def test_windows_label_which_analysis_windows_contain_excluded_days(reference):
     q = check_data_quality(metrics, events)
     d = build_disclosure(q, True, {"pre": (date(2026, 9, 1), date(2026, 9, 30)), "post": (date(2026, 10, 1), date(2026, 10, 31))})
     assert d.excluded_days[0].windows == ["pre"]
+
+
+# ------------------------------------------------------------------ PR #3 review regression (finding 6)
+
+
+def _max_count_rows(n: int):
+    big = 2**53 - 1
+    return pd.DataFrame(
+        {
+            "date": ["2026-08-01"] * n,
+            "device": "d",
+            "browser": "b",
+            "channel": [f"c{i}" for i in range(n)],
+            "customer_type": "n",
+            "sessions": big,
+            "orders": big,
+        }
+    )
+
+
+def test_every_analysis_entry_point_rejects_aggregates_that_would_wrap():
+    """1,025 individually valid maximum-count rows used to wrap daily sessions negative."""
+    from causelens.analytics import (
+        DataValidationError,
+        check_data_quality,
+        confirm_change,
+        detect_change_point,
+    )
+
+    rows = _max_count_rows(1025)
+    with pytest.raises(DataValidationError, match="aggregate maximum"):
+        prepare_daily_series(rows)
+    with pytest.raises(DataValidationError, match="aggregate maximum"):
+        check_data_quality(rows)
+    with pytest.raises(DataValidationError, match="aggregate maximum"):
+        confirm_change(rows, ("2026-07-01", "2026-07-31"), ("2026-08-01", "2026-08-31"))
+    with pytest.raises(DataValidationError, match="aggregate maximum"):
+        detect_change_point(rows)
+
+
+def test_large_but_supported_totals_are_summed_exactly():
+    rows = _max_count_rows(1000)
+    rows["sessions"] = 10**12 + 1
+    rows["orders"] = 10**9 + 7
+    daily = prepare_daily_series(rows, apply_exclusions=False).daily
+    assert daily.loc["2026-08-01", "sessions"] == 1000 * (10**12 + 1)  # exact: below 2**53
+    assert daily.loc["2026-08-01", "orders"] == 1000 * (10**9 + 7)
+    assert daily.loc["2026-08-01", "rate"] == pytest.approx((10**9 + 7) / (10**12 + 1))

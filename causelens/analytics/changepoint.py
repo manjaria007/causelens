@@ -122,39 +122,76 @@ class CandidateMatchResult(BaseModel):
 # --------------------------------------------------------------------------- core search
 
 
+#: Relative scale below which values are treated as equal. A series whose spread is under
+#: ``REL_TOL`` times its magnitude is constant for every purpose here; this is far above float64
+#: rounding error (~1e-16) and far below any real day-to-day variation in a conversion rate.
+REL_TOL = 1e-9
+
+
 def _split_costs(y: np.ndarray, min_seg: int) -> tuple[np.ndarray, np.ndarray]:
-    """Two-segment SSE for each split ``k`` (left = y[:k], right = y[k:]), k in [min_seg, n-min_seg]."""
+    """Two-segment SSE for each split ``k`` (left = y[:k], right = y[k:]), k in [min_seg, n-min_seg].
+
+    The series is centred first, so rounding error scales with the *variation* in ``y`` rather than
+    with its level: ``sum(y**2) - sum(y)**2 / k`` on a series of identical values near 0.03 would
+    otherwise leave residue far larger than the true cost of zero.
+    """
     n = len(y)
-    s, q = np.cumsum(y), np.cumsum(y * y)
+    c = y - y.mean()
+    s, q = np.cumsum(c), np.cumsum(c * c)
     ks = np.arange(min_seg, n - min_seg + 1)
     left = q[ks - 1] - s[ks - 1] ** 2 / ks
     right = (q[-1] - q[ks - 1]) - (s[-1] - s[ks - 1]) ** 2 / (n - ks)
-    return ks, left + right
+    return ks, np.maximum(left + right, 0.0)
+
+
+def _tol_cost(x: np.ndarray) -> float:
+    """Squared-error level below which a fit is exact: ``n * (REL_TOL * scale)**2``."""
+    return float(len(x) * (REL_TOL * max(float(np.abs(x).max()), 1e-300)) ** 2)
+
+
+def _sse(y: np.ndarray) -> float:
+    return float(np.sum((y - y.mean()) ** 2))
 
 
 def _fit(
     x: np.ndarray, wd: np.ndarray, min_seg: int, adjust: bool, max_iter: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, int]:
-    """Jointly fit weekday factors and one mean shift. Returns (y, ks, costs, factors, iterations)."""
-    factors = np.ones(7)
-    iterations = 0
-    for iterations in range(1, max_iter + 1):
-        y = x / factors[wd]
-        ks, costs = _split_costs(y, min_seg)
-        k = int(ks[int(np.argmin(costs))])
-        if not adjust:
-            return y, ks, costs, None, 0
-        level = np.where(np.arange(len(x)) < k, y[:k].mean(), y[k:].mean())
-        ratio = x / level
-        new = np.array([ratio[wd == w].mean() for w in range(7)])
-        new = new / float(np.mean(new[wd]))
-        done = float(np.max(np.abs(new - factors))) < 1e-12
-        factors = new
-        if done:
-            break
-    y = x / factors[wd]
-    ks, costs = _split_costs(y, min_seg)
-    return y, ks, costs, factors, iterations
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, int, str | None]:
+    """Jointly fit weekday factors and one mean shift.
+
+    Returns ``(y, ks, costs, factors, iterations, fallback_reason)``. Multiplicative factors are
+    undefined when a fitted level or a weekday's average ratio is zero (for example a series of
+    zero-order days); the fit then falls back to no adjustment and says why.
+    """
+    idx = np.arange(len(x))
+    if adjust:
+        factors = np.ones(7)
+        reason = None
+        for iteration in range(1, max_iter + 1):
+            y = x / factors[wd]
+            ks, costs = _split_costs(y, min_seg)
+            k = int(ks[int(np.argmin(costs))])
+            level = np.where(idx < k, y[:k].mean(), y[k:].mean())
+            if not np.all(level > 0):
+                reason = "a fitted conversion level is zero, so multiplicative weekday factors are undefined"
+                break
+            ratio = x / level
+            new = np.array([ratio[wd == w].mean() for w in range(7)])
+            if not (np.all(np.isfinite(new)) and np.all(new > 0)):
+                reason = "a weekday's average conversion is zero, so its multiplicative factor is undefined"
+                break
+            new = new / float(np.mean(new[wd]))
+            done = float(np.max(np.abs(new - factors))) < 1e-12
+            factors = new
+            if done:
+                break
+        if reason is None:
+            y = x / factors[wd]
+            ks, costs = _split_costs(y, min_seg)
+            return y, ks, costs, factors, iteration, None
+        ks, costs = _split_costs(x, min_seg)
+        return x, ks, costs, None, 0, reason
+    ks, costs = _split_costs(x, min_seg)
+    return x, ks, costs, None, 0, None
 
 
 def _empty_result(
@@ -188,6 +225,50 @@ def _empty_result(
         exclusions=disclosure,
         assumptions=[],
         summary=reason,
+    )
+
+
+def _constant_result(
+    segment: dict[str, str],
+    disclosure: ExclusionDisclosure,
+    n_used: int,
+    window: tuple[Date, Date] | None,
+    level: float,
+    n_splits: int,
+    adjusted: bool = False,
+) -> ChangePointResult:
+    """The usable series has no variation (to within ``REL_TOL``): there is nothing to locate."""
+    what = "after removing the weekday pattern " if adjusted else ""
+    return ChangePointResult(
+        status="ok",
+        segment=segment,
+        change_detected=False,
+        direction=None,
+        best_date=None,
+        plausible_dates=[],
+        plausible_range=None,
+        plausible_level=level,
+        threshold_noise_units=None,
+        shift_in_residual_sd=None,
+        p_value_adjusted=1.0,
+        n_splits_scanned=n_splits,
+        n_days_used=n_used,
+        n_days_before=None,
+        n_days_after=None,
+        search_window=window,
+        weekday_adjustment=WeekdayAdjustment(
+            applied=False, reason="not needed: the series has no variation to adjust"
+        ),
+        gap_note=None,
+        exclusions=disclosure,
+        assumptions=[
+            "A single sustained shift in the conversion level is assumed (one change point).",
+            "A date being plausible says only when the level shifted, not why.",
+        ],
+        summary=(
+            f"No change point exists: the conversion series {what}is constant across the {n_used} usable "
+            "days, so there is no shift to locate and no events are matched."
+        ),
     )
 
 
@@ -278,29 +359,36 @@ def detect_change_point(
     else:
         adjust, wk_reason = True, "multiplicative weekday factors estimated jointly with the shift"
 
-    y, ks, costs, factors, iterations = _fit(x, wd, min_segment_days, adjust, max_iterations)
+    if _sse(x) <= _tol_cost(x):
+        return _constant_result(prepared.segment, disclosure, n, window, plausible_level, n_splits=n - 2 * min_segment_days + 1)
+
+    y, ks, costs, factors, iterations, fallback = _fit(x, wd, min_segment_days, adjust, max_iterations)
+    if fallback is not None:
+        adjust, wk_reason = False, f"fell back to no adjustment: {fallback}"
+    n_splits = len(ks)
+    if _sse(y) <= _tol_cost(y):  # constant once the weekday pattern is removed
+        return _constant_result(prepared.segment, disclosure, n, window, plausible_level, n_splits=n_splits, adjusted=adjust)
     best = int(np.argmin(costs))
     k_best, c_best = int(ks[best]), float(costs[best])
-    n_splits = len(ks)
 
     dof = max(n - 2 - (6 if adjust else 0), 1)
     sigma2 = c_best / dof
     left, right = y[:k_best].mean(), y[k_best:].mean()
     shift = float(right - left)
     thr = float(stats.chi2.ppf(plausible_level, 1))
-    tiny = 1e-18
-    if sigma2 <= tiny:
-        shift_sd = None if abs(shift) <= tiny else float(np.sign(shift) * np.inf)
-        p_adj = 0.0 if abs(shift) > tiny else 1.0
-        near = np.abs(costs - c_best) <= tiny
+    tol = _tol_cost(y)
+    if c_best <= tol:
+        # A perfect step: no residual noise, so the residual sd is undefined and only splits that
+        # also fit exactly are plausible. (The constant case returned above.)
+        shift_sd = None
+        p_adj = 0.0
+        near = costs <= tol
     else:
         t_stat = shift / np.sqrt(sigma2 * (1 / k_best + 1 / (n - k_best)))
         p_single = float(2 * stats.t.sf(abs(t_stat), dof))
         p_adj = min(1.0, p_single * n_splits)
         shift_sd = float(shift / np.sqrt(sigma2))
         near = (costs - c_best) <= thr * sigma2
-    if shift_sd is not None and not np.isfinite(shift_sd):
-        shift_sd = None
     detected = bool(p_adj < alpha)
 
     # ---- plausible calendar dates (unusable days before a candidate start could also be the start)
@@ -323,7 +411,7 @@ def detect_change_point(
     plausible_dates = sorted(plausible)
 
     direction = None if shift == 0 else ("decrease" if shift < 0 else "increase")
-    level_pct = round(plausible_level * 100)
+    level_pct = f"{100 * plausible_level:g}"
     assumptions = [
         "A single sustained shift in the conversion level is assumed (one change point).",
         "Residual day-to-day noise is assumed roughly constant and independent across days.",

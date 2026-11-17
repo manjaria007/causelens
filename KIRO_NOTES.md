@@ -112,3 +112,25 @@ For each task, record:
 - Hook status (see the Hooks section on the `hook-pytest-on-stop` branch): the `Stop` hook is
   unverified, and no hook execution record exists for this task. These results come from running
   the commands directly, not from a hook.
+
+### Task 3 review round (PR #3, review supplied by the user)
+
+- Six findings, all reproduced before fixing, each with focused regression tests that were checked
+  to fail on the previous commit (`f803714`): (1) constant data reported a certain change because
+  split costs were computed without centring, so float residue looked like signal; (2) zero-conversion
+  series crashed in weekday adjustment; (3) the pooled-rate estimate and the daily-mean t-test,
+  effect size and power targeted different quantities; (4) relative intervals silently dropped
+  zero-denominator bootstrap draws; (5) custom confidence levels were always labelled "95% CI";
+  (6) valid maximum-count rows overflowed int64 when summed.
+- Decisions: the test now targets the pooled rate (ratio-estimator variance) so estimate, interval,
+  test, effect size and power agree; the relative interval is withheld (with the reason) when it is
+  unbounded rather than approximated; constant series return "no change point exists"; and the
+  loader rejects aggregates above 2**53 - 1 with a typed error. The last one changes the Task 2
+  loader's contract (total, not just per-row), which is documented in `docs/data-quality.md`.
+  `welch_significant` was renamed `test_significant` because the test is no longer a plain Welch test
+  on daily means.
+- Results: `.venv/bin/python -m pytest -q` passed (262 tests); `.venv/bin/python -m ruff check
+  causelens tests` passed. Re-measured: null `confirm_change` false positives 5/150, a 5% drop
+  confirmed 146/150.
+- A `Stop` hook execution record still does not exist (see the Hooks section on the
+  `hook-pytest-on-stop` branch); these results come from running the commands directly.

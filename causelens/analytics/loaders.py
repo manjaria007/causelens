@@ -21,8 +21,9 @@ EVENT_TYPES: tuple[str, ...] = ("release", "campaign", "incident")
 EVENT_COLUMNS: tuple[str, ...] = ("date", "type", "name", "scope", "description")
 _REQUIRED_EVENT_COLUMNS: tuple[str, ...] = ("date", "type", "name", "scope")
 
-#: Largest accepted session/order count. 2**53 - 1 is the largest integer a float64
-#: represents exactly, so counts are never silently rounded, and it is far below int64.
+#: Largest accepted session/order count, and largest accepted *total* of either column across all
+#: rows. 2**53 - 1 is the largest integer a float64 represents exactly, so counts and every
+#: aggregate of them (daily, segment, window totals) are exact and can never wrap int64.
 MAX_COUNT: int = 2**53 - 1
 
 _MAX_REPORTED = 10
@@ -138,13 +139,25 @@ def _check_counts(col: str, series: pd.Series, rows: _Rows, problems: list[str])
     return out
 
 
+def _exact_total(values: np.ndarray) -> int:
+    """Exact sum of non-negative int64 counts without int64 wraparound.
+
+    A float64 sum decides quickly when the total is clearly small; otherwise Python integers
+    are summed exactly.
+    """
+    if float(values.astype("float64").sum()) < 2**50:
+        return int(values.sum())
+    return sum(int(v) for v in values)
+
+
 def validate_metrics(
     df: pd.DataFrame, source: str = "metrics", *, _from_file: bool = False
 ) -> pd.DataFrame:
     """Validate a metrics frame and return a clean, typed copy sorted by date and segment.
 
     Rejects: missing required columns; unparseable dates; blank dimension values;
-    non-integer, missing, negative or out-of-range (> ``MAX_COUNT``) counts;
+    non-integer, missing, negative or out-of-range (> ``MAX_COUNT``) counts; a total of either
+    count column across all rows above ``MAX_COUNT`` (so no aggregate can wrap or lose precision);
     ``orders > sessions``; duplicate (date, segment) rows; no rows. Extra columns are
     dropped. The input frame is not modified and its index labels may repeat.
     """
@@ -169,6 +182,14 @@ def validate_metrics(
     _fail(source, problems)
 
     sessions, orders = counts["sessions"], counts["orders"]
+    for col, values in (("sessions", sessions), ("orders", orders)):
+        total = _exact_total(values)
+        if total > MAX_COUNT:
+            message = (
+                f"total {col} across all rows ({total}) exceeds the supported aggregate maximum "
+                f"({MAX_COUNT}); daily and segment totals could not be computed exactly"
+            )
+            raise DataValidationError(source, [message])
     work["sessions"], work["orders"] = sessions, orders
 
     for pos in _positions(orders > sessions):

@@ -6,11 +6,15 @@ Method (design.md): daily conversion is ``orders / sessions``.
   (total orders / total sessions), with 95% **bootstrap** intervals that resample *days*
   with replacement (``seed`` makes them reproducible). The absolute change (percentage
   points) and relative change get intervals the same way, resampling both windows.
-* **Noise test**: a Welch t-test on the day-level rates, reported together with its effect
-  size, which is measured against the pre-period's own day-to-day variability
-  (``(mean_post - mean_pre) / sd_pre``) as Requirement 2.2 asks.
+* **Noise test**: a t-test on the *same pooled rate* the estimates report. Days are the units, so
+  the variance of each window's pooled rate comes from the ratio estimator
+  (``Var = n/(n-1) * sum((orders_i - R*sessions_i)^2) / (sum sessions)^2``), and the difference is
+  tested with Welch degrees of freedom. The effect size is the change divided by the pre-period's
+  own day-to-day sd (session-weighted, about the pooled rate), as Requirement 2.2 asks. The data-needed
+  estimate uses the same variance, so the estimate, interval, test, effect size and power all target
+  one quantity.
 * The change is called **real** only if the bootstrap interval for the absolute change
-  excludes 0 *and* the Welch p-value is below ``alpha``. Disagreement is reported as not
+  excludes 0 *and* the t-test p-value is below ``alpha``. Disagreement is reported as not
   distinguishable from noise (the conservative reading).
 
 Days flagged by Task 2 are excluded by default and disclosed. If that (or missing data) leaves
@@ -71,17 +75,20 @@ class WindowSummary(BaseModel):
 class NoiseTest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    method: str = "welch_t_on_daily_rates"
+    method: str = "welch_t_on_pooled_rate_ratio_estimator"
     t_statistic: float | None
     degrees_of_freedom: float | None
     p_value: float | None
     alpha: float
     effect_size_pre_sd: float | None = Field(
-        description="(mean daily rate after - before) / sd of the pre-period's daily rates."
+        description="Pooled change divided by the pre-period's day-to-day sd (session-weighted, about "
+        "the pooled rate): the same quantity as abs_change_pp, in pre-period noise units."
     )
-    pre_daily_sd_pp: float | None = Field(description="Pre-period day-to-day sd of conversion, in pp.")
+    pre_daily_sd_pp: float | None = Field(
+        description="Pre-period session-weighted day-to-day sd of the daily rate, in pp."
+    )
     post_daily_sd_pp: float | None
-    welch_significant: bool
+    test_significant: bool = Field(description="p_value < alpha for the pooled-rate t-test.")
     bootstrap_excludes_zero: bool
     note: str
 
@@ -109,6 +116,9 @@ class ConfirmChangeResult(BaseModel):
     post: WindowSummary
     abs_change_pp: Interval | None = Field(description="After minus before, in percentage points.")
     rel_change: Interval | None = Field(description="After / before - 1 as a fraction (-0.06 = -6%).")
+    rel_change_unavailable_reason: str | None = Field(
+        None, description="Why rel_change is None (zero 'before' rate in the data or in resamples)."
+    )
     noise_test: NoiseTest | None
     is_real: bool
     verdict: Literal["real_change", "not_distinguishable_from_noise", "insufficient_data"]
@@ -145,11 +155,27 @@ def _interval(estimate: float, boot: np.ndarray, level: float) -> tuple[Interval
     return Interval(estimate=estimate, lower=float(min(lo, estimate)), upper=float(max(hi, estimate)), level=level), widened
 
 
-def _daily_sd(x: np.ndarray) -> float:
-    """Sample sd of day-level rates; exactly 0.0 when the values are identical up to float noise."""
-    if np.ptp(x) <= 1e-12 * max(float(np.abs(x).max()), 1e-300):
-        return 0.0
-    return float(np.std(x, ddof=1))
+def _ratio_summary(orders: np.ndarray, sessions: np.ndarray, rate: float) -> tuple[float, float]:
+    """Pre/post-window noise measures for the pooled rate ``rate = sum(orders) / sum(sessions)``.
+
+    Returns ``(weighted_daily_sd, variance_of_pooled_rate)`` with days as the sampling units:
+
+    * weighted sd: ``sqrt(n/(n-1) * sum(sessions_i * (rate_i - rate)^2) / sum(sessions))``, the
+      session-weighted day-to-day spread of the daily rate about the pooled rate;
+    * variance: the ratio-estimator variance
+      ``n/(n-1) * sum((orders_i - rate * sessions_i)^2) / (sum sessions)^2``.
+
+    Both are exactly 0.0 when every daily rate is identical up to float noise.
+    """
+    n = len(orders)
+    daily = orders / sessions
+    if np.ptp(daily) <= 1e-9 * max(float(np.abs(daily).max()), 1e-300):
+        return 0.0, 0.0
+    total = float(sessions.sum())
+    resid = orders - rate * sessions
+    variance = n / (n - 1) * float(np.sum(resid**2)) / total**2
+    weighted_sd = math.sqrt(n / (n - 1) * float(np.sum(sessions * (daily - rate) ** 2)) / total)
+    return weighted_sd, variance
 
 
 def _weekday_mix(days: pd.DatetimeIndex) -> np.ndarray:
@@ -274,6 +300,7 @@ def confirm_change(
             post=post_sum,
             abs_change_pp=None,
             rel_change=None,
+            rel_change_unavailable_reason="no before/after estimate was produced",
             noise_test=None,
             is_real=False,
             verdict="insufficient_data",
@@ -287,12 +314,12 @@ def confirm_change(
             summary=summary,
         )
 
-    # ---- point estimates (pooled rates)
+    # ---- point estimates (pooled rates): the single quantity every statistic below targets
     po, ps = pre_days["orders"].to_numpy(), pre_days["sessions"].to_numpy()
     qo, qs = post_days["orders"].to_numpy(), post_days["sessions"].to_numpy()
     before, after = po.sum() / ps.sum(), qo.sum() / qs.sum()
     abs_change = after - before
-    rel_change = after / before - 1 if before > 0 else float("nan")
+    lvl = f"{100 * level:g}%"
 
     # ---- bootstrap over days (resample each window's days with replacement)
     rng = np.random.default_rng(seed)
@@ -303,44 +330,57 @@ def confirm_change(
     before_ci, w1 = _interval(before, b_before, level)
     after_ci, w2 = _interval(after, b_after, level)
     abs_ci, w3 = _interval(abs_change, b_after - b_before, level)
-    rel_ci: Interval | None = None
-    w4 = False
-    if before > 0:
-        with np.errstate(divide="ignore", invalid="ignore"):
-            b_rel = b_after / b_before - 1
-        b_rel = b_rel[np.isfinite(b_rel)]
-        if len(b_rel):
-            rel_ci, w4 = _interval(rel_change, b_rel, level)
 
-    # ---- noise test on day-level rates, with effect size against the pre-period's variability
-    x_pre, x_post = pre_days["rate"].to_numpy(), post_days["rate"].to_numpy()
-    sd_pre, sd_post = _daily_sd(x_pre), _daily_sd(x_post)
-    mean_diff = float(x_post.mean() - x_pre.mean())
-    if sd_pre == 0 and sd_post == 0:
+    # Relative change = after / before - 1. It is unbounded whenever a resampled 'before' rate is 0,
+    # so such draws are never dropped silently: the interval is withheld and the reason reported.
+    rel_ci: Interval | None = None
+    rel_reason: str | None = None
+    w4 = False
+    if before <= 0:
+        rel_reason = "the 'before' conversion is zero, so a relative change is undefined"
+    else:
+        n_zero = int(np.sum(b_before <= 0))
+        if n_zero:
+            rel_reason = (
+                f"{n_zero} of {n_bootstrap} bootstrap resamples had zero orders in the 'before' window, "
+                "so the ratio is unbounded there and no honest relative interval can be given; use the "
+                "absolute change"
+            )
+        else:
+            rel_ci, w4 = _interval(after / before - 1, b_after / b_before - 1, level)
+
+    # ---- t-test on the SAME pooled rate (days are the units; ratio-estimator variance)
+    sd_pre, var_pre = _ratio_summary(po, ps, before)
+    sd_post, var_post = _ratio_summary(qo, qs, after)
+    n_pre, n_post = len(po), len(qo)
+    flat_change = abs(abs_change) <= 1e-9 * max(before, after, 1e-300)
+    var_sum = var_pre + var_post
+    if var_sum == 0:
         t_stat = df = None
-        p_value = 0.0 if abs(mean_diff) > 1e-12 * max(float(np.abs(x_pre).max()), 1e-300) else 1.0
-        mean_diff = 0.0 if p_value == 1.0 else mean_diff
+        p_value = 1.0 if flat_change else 0.0
         note_extra = "Both windows have identical daily rates within themselves (zero variability)."
     else:
-        res = stats.ttest_ind(x_post, x_pre, equal_var=False)
-        t_stat, p_value = float(res.statistic), float(res.pvalue)
-        v1, v2 = sd_pre**2 / len(x_pre), sd_post**2 / len(x_post)
-        df = float((v1 + v2) ** 2 / (v1**2 / (len(x_pre) - 1) + v2**2 / (len(x_post) - 1)))
+        t_stat = abs_change / math.sqrt(var_sum)
+        df = float(
+            var_sum**2
+            / ((var_pre**2 / (n_pre - 1) if var_pre else 0.0) + (var_post**2 / (n_post - 1) if var_post else 0.0))
+        )
+        p_value = float(2 * stats.t.sf(abs(t_stat), df))
         note_extra = ""
-    effect = mean_diff / sd_pre if sd_pre > 0 else None
+    effect = abs_change / sd_pre if sd_pre > 0 else None
     boot_excludes = bool(abs_ci.lower > 0 or abs_ci.upper < 0)
-    welch_sig = bool(p_value < alpha)
-    is_real = boot_excludes and welch_sig
+    test_sig = bool(p_value < alpha)
+    is_real = boot_excludes and test_sig
 
     if is_real:
-        noise_note = "Both the bootstrap interval and the Welch test indicate a difference between the windows."
-    elif boot_excludes != welch_sig:
+        noise_note = "Both the bootstrap interval and the t-test indicate a difference between the windows."
+    elif boot_excludes != test_sig:
         noise_note = (
-            "The bootstrap interval and the Welch test disagree, so the difference is not "
+            "The bootstrap interval and the t-test disagree, so the difference is not "
             "distinguishable from noise at this evidence level."
         )
     else:
-        noise_note = "Neither the bootstrap interval nor the Welch test separates the windows."
+        noise_note = "Neither the bootstrap interval nor the t-test separates the windows."
     noise = NoiseTest(
         t_statistic=t_stat,
         degrees_of_freedom=df,
@@ -349,30 +389,32 @@ def confirm_change(
         effect_size_pre_sd=effect,
         pre_daily_sd_pp=100 * sd_pre,
         post_daily_sd_pp=100 * sd_post,
-        welch_significant=welch_sig,
+        test_significant=test_sig,
         bootstrap_excludes_zero=boot_excludes,
         note=(noise_note + " " + note_extra).strip(),
     )
 
-    # ---- how much data would be needed if the change is not distinguishable from noise
+    # ---- how much more data, for the same pooled-rate difference and its variance
     data_needed: DataNeeded | None = None
     if not is_real:
         z_a, z_b = stats.norm.ppf(1 - alpha / 2), stats.norm.ppf(0.8)
-        n_now = min(len(x_pre), len(x_post))
-        mde = float((z_a + z_b) * math.sqrt(sd_pre**2 / len(x_pre) + sd_post**2 / len(x_post)))
+        n_now = min(n_pre, n_post)
+        mde = float((z_a + z_b) * math.sqrt(var_sum))
         needed = extra = None
-        if abs(mean_diff) > 0 and (sd_pre > 0 or sd_post > 0):
-            needed = max(math.ceil((z_a + z_b) ** 2 * (sd_pre**2 + sd_post**2) / mean_diff**2), 2)
+        if not flat_change and var_sum > 0:
+            # Var of each pooled rate scales as 1/n, so n days per window give variance
+            # (var_pre * n_pre + var_post * n_post) / n for the difference.
+            needed = max(math.ceil((z_a + z_b) ** 2 * (var_pre * n_pre + var_post * n_post) / abs_change**2), 2)
             extra = max(0, needed - n_now)
             note = (
-                f"At the observed change and day-to-day variability, about {needed} days per window "
+                f"At the observed pooled change and day-to-day variability, about {needed} days per window "
                 f"would give 80% power at alpha {alpha:g} (you have {n_now}): roughly {extra} more per "
                 "window, if the change is real and the variability holds. With the current days only "
                 f"changes of about {_pp(mde)} pp or more could be detected."
             )
         else:
             note = (
-                "The observed change is essentially zero, so collecting more days of the same data "
+                "The observed pooled change is essentially zero, so collecting more days of the same data "
                 f"would not help unless a smaller change matters; with the current days only changes "
                 f"of about {_pp(mde)} pp or more could be detected."
             )
@@ -385,9 +427,7 @@ def confirm_change(
 
     pre_sum = pre_sum.model_copy(update={"conversion": before_ci})
     post_sum = post_sum.model_copy(update={"conversion": after_ci})
-    mix_gap = float(
-        0.5 * np.abs(_weekday_mix(pre_days.index) - _weekday_mix(post_days.index)).sum()
-    )
+    mix_gap = float(0.5 * np.abs(_weekday_mix(pre_days.index) - _weekday_mix(post_days.index)).sum())
     if mix_gap > 0.1:
         assumptions.append(
             f"The windows' weekday mixes differ (distance {mix_gap:.2f}); part of the difference may be "
@@ -406,14 +446,19 @@ def confirm_change(
     abs_pp = abs_ci.model_copy(update={k: 100 * getattr(abs_ci, k) for k in ("estimate", "lower", "upper")})
     p_text = "p < 0.0001" if p_value < 1e-4 else f"p = {p_value:.4f}"
     body = (
-        f"Conversion was {_pp(before)}% before (n={len(x_pre)} days, {pre_sum.sessions:,} sessions) and "
-        f"{_pp(after)}% after (n={len(x_post)} days, {post_sum.sessions:,} sessions): a change of "
-        f"{abs_pp.estimate:+.3f} pp (95% CI {abs_pp.lower:+.3f} to {abs_pp.upper:+.3f})"
+        f"Conversion was {_pp(before)}% before (n={n_pre} days, {pre_sum.sessions:,} sessions) and "
+        f"{_pp(after)}% after (n={n_post} days, {post_sum.sessions:,} sessions): a change of "
+        f"{abs_pp.estimate:+.3f} pp ({lvl} CI {abs_pp.lower:+.3f} to {abs_pp.upper:+.3f})"
     )
     if rel_ci is not None:
-        body += f", {100 * rel_ci.estimate:+.1f}% relative (95% CI {100 * rel_ci.lower:+.1f}% to {100 * rel_ci.upper:+.1f}%)"
+        body += (
+            f", {100 * rel_ci.estimate:+.1f}% relative "
+            f"({lvl} CI {100 * rel_ci.lower:+.1f}% to {100 * rel_ci.upper:+.1f}%)"
+        )
+    else:
+        body += f". The relative change is not reported: {rel_reason}"
     eff_text = "n/a" if effect is None else f"{effect:+.2f}"
-    body += f". Effect size {eff_text} pre-period daily sd; Welch {p_text}. "
+    body += f". Effect size {eff_text} pre-period daily sd; t-test {p_text}. "
     if is_real:
         body += "The difference is distinguishable from normal day-to-day variation; this does not say why it happened."
     else:
@@ -430,6 +475,7 @@ def confirm_change(
         post=post_sum,
         abs_change_pp=abs_pp,
         rel_change=rel_ci,
+        rel_change_unavailable_reason=rel_reason,
         noise_test=noise,
         is_real=is_real,
         verdict="real_change" if is_real else "not_distinguishable_from_noise",

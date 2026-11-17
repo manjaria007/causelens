@@ -41,7 +41,7 @@ def test_reference_change_is_confirmed_with_effect_size_and_intervals(result):
     assert not result.stop_investigation and result.data_needed is None
     assert result.abs_change_pp.upper < 0  # the interval excludes zero on the negative side
     nt = result.noise_test
-    assert nt.welch_significant and nt.bootstrap_excludes_zero and nt.p_value < nt.alpha
+    assert nt.test_significant and nt.bootstrap_excludes_zero and nt.p_value < nt.alpha
     assert nt.effect_size_pre_sd < 0  # measured in the pre-period's own daily sd
     assert nt.pre_daily_sd_pp > 0
 
@@ -53,7 +53,7 @@ def test_every_interval_is_ordered_and_95_percent(result):
 
 def test_summary_reports_sample_sizes_effect_size_and_does_not_claim_a_cause(result):
     s = result.summary
-    assert "n=" in s and "95% CI" in s and "Effect size" in s and "Welch p" in s
+    assert "n=" in s and "95% CI" in s and "Effect size" in s and "t-test p" in s
     assert "does not say why" in s
     for banned in ("caused", "because of", "due to", "led to"):
         assert banned not in s.lower()
@@ -144,8 +144,8 @@ def test_stable_period_is_not_distinguishable_and_the_investigation_stops(refere
 
 def test_disagreeing_tests_are_reported_as_not_distinguishable(reference):
     metrics, events = reference
-    r = confirm_change(metrics, PRE, POST, events, alpha=1e-12)  # a threshold the Welch p-value does not reach
-    assert r.noise_test.bootstrap_excludes_zero and not r.noise_test.welch_significant
+    r = confirm_change(metrics, PRE, POST, events, alpha=1e-12)  # a threshold the t-test p-value does not reach
+    assert r.noise_test.bootstrap_excludes_zero and not r.noise_test.test_significant
     assert not r.is_real and r.stop_investigation
     assert "disagree" in r.noise_test.note
 
@@ -233,3 +233,148 @@ def test_invalid_metrics_still_raise_the_typed_error():
 
 def test_result_serialises_to_json_without_nan(result):
     assert "NaN" not in result.model_dump_json()
+
+
+# ------------------------------------------------------------------ PR #3 review regressions
+# Finding 3: estimate, interval, test, effect size and power all target the pooled rate.
+
+
+def _mixed_traffic_windows():
+    """Pre: 7 low-traffic days at 8% and 7 high-traffic days at 1.8%; post: 14 high-traffic days at 1.8%.
+
+    The pooled rate barely moves (about 1.805% -> 1.8%), but the equal-weight mean of daily rates falls
+    by about 3.1 pp, which is what the old Welch test and effect size responded to."""
+    sessions = np.r_[np.full(7, 100), np.full(7, 100_000), np.full(14, 100_000)]
+    orders = np.r_[np.full(7, 8), np.full(7, 1_800), np.full(14, 1_800)]
+    return to_frame(sessions, orders), (day(0), day(13)), (day(14), day(27))
+
+
+def _ratio_variance(o: np.ndarray, s: np.ndarray) -> tuple[float, float]:
+    """Independent ratio-estimator variance of the pooled rate and the weighted daily sd."""
+    n, rate = len(o), o.sum() / s.sum()
+    var = n / (n - 1) * np.sum((o - rate * s) ** 2) / s.sum() ** 2
+    wsd = np.sqrt(n / (n - 1) * np.sum(s * (o / s - rate) ** 2) / s.sum())
+    return float(var), float(wsd)
+
+
+def test_a_difference_in_equal_weight_daily_means_does_not_make_an_unchanged_pooled_rate_real():
+    df, pre, post = _mixed_traffic_windows()
+    r = confirm_change(df, pre, post, n_bootstrap=500, apply_exclusions=False)  # isolate the estimand
+    daily = df["orders"] / df["sessions"]
+    mean_gap_pp = 100 * (daily[14:].mean() - daily[:14].mean())
+    assert mean_gap_pp < -3  # the old target: large
+    assert abs(r.abs_change_pp.estimate) < 0.01  # the reported target: ~0
+    assert not r.is_real and r.verdict == "not_distinguishable_from_noise"
+    assert abs(r.noise_test.effect_size_pre_sd) < 0.1  # consistent with the pooled change, not the mean gap
+    assert r.noise_test.p_value > 0.05
+
+
+def test_t_statistic_effect_size_and_power_are_recomputed_independently_from_the_pooled_rate():
+    from scipy import stats as sp
+
+    df, pre, post = _mixed_traffic_windows()
+    r = confirm_change(df, pre, post, n_bootstrap=500, apply_exclusions=False)
+    o, s = df["orders"].to_numpy(), df["sessions"].to_numpy()
+    po, ps, qo, qs = o[:14], s[:14], o[14:], s[14:]
+    v_pre, sd_pre = _ratio_variance(po, ps)
+    v_post, _ = _ratio_variance(qo, qs)
+    delta = qo.sum() / qs.sum() - po.sum() / ps.sum()
+    se = np.sqrt(v_pre + v_post)
+    assert r.abs_change_pp.estimate == pytest.approx(100 * delta)
+    assert r.noise_test.t_statistic == pytest.approx(delta / se)
+    assert r.noise_test.effect_size_pre_sd == pytest.approx(delta / sd_pre)
+    assert r.noise_test.pre_daily_sd_pp == pytest.approx(100 * sd_pre)
+    df_w = (v_pre + v_post) ** 2 / (v_pre**2 / 13 + v_post**2 / 13)
+    assert r.noise_test.degrees_of_freedom == pytest.approx(df_w)
+    assert r.noise_test.p_value == pytest.approx(2 * sp.t.sf(abs(delta) / se, df_w))
+    z = sp.norm.ppf(0.975) + sp.norm.ppf(0.8)
+    assert r.data_needed.minimum_detectable_change_pp == pytest.approx(100 * z * se)
+    needed = int(np.ceil(z**2 * (v_pre * 14 + v_post * 14) / delta**2))
+    assert r.data_needed.days_per_window_for_observed_change == max(needed, 2)
+
+
+def test_pooled_drop_hidden_by_traffic_mix_in_daily_means_is_still_found():
+    """The reverse mismatch: the pooled rate falls 1.8% -> 1.0% while the daily-mean gap is far larger."""
+    sessions = np.r_[np.full(7, 100_000), np.full(7, 100), np.full(14, 100_000)]
+    orders = np.r_[np.full(7, 1_800), np.full(7, 8), np.full(14, 1_000)]
+    r = confirm_change(
+        to_frame(sessions, orders), (day(0), day(13)), (day(14), day(27)), n_bootstrap=500, apply_exclusions=False
+    )
+    assert r.abs_change_pp.upper < 0 and r.noise_test.t_statistic < 0 and r.noise_test.effect_size_pre_sd < 0
+    assert r.abs_change_pp.estimate == pytest.approx(
+        100 * (r.post.conversion.estimate - r.pre.conversion.estimate)
+    )
+
+
+def test_estimate_interval_test_and_power_agree_on_direction_for_reference_data(result):
+    assert result.abs_change_pp.estimate < 0 and result.noise_test.t_statistic < 0
+    assert result.noise_test.effect_size_pre_sd < 0
+    assert result.abs_change_pp.lower <= result.abs_change_pp.estimate <= result.abs_change_pp.upper
+
+
+def test_zero_difference_with_variation_is_reported_as_essentially_zero_not_as_needing_more_data():
+    df = bounded_series(5, 56)
+    same = df.copy()
+    same.loc[28:, ["sessions", "orders"]] = df.loc[:27, ["sessions", "orders"]].to_numpy()
+    r = confirm_change(same, (day(0), day(27)), (day(28), day(55)), n_bootstrap=300)
+    assert not r.is_real and "essentially zero" in r.data_needed.note
+    assert r.data_needed.days_per_window_for_observed_change is None
+
+
+# Finding 4: relative intervals are never built from silently discarded draws.
+
+
+def _sparse_frame():
+    rng = np.random.default_rng(3)
+    sessions = np.full(40, 150)
+    return to_frame(sessions, rng.binomial(sessions, 0.002))
+
+
+def test_relative_interval_is_withheld_when_resamples_have_zero_before_orders():
+    """Previously 229 of 2,000 draws were dropped and a finite '95%' relative interval was reported."""
+    df = _sparse_frame()
+    r = confirm_change(df, (day(0), day(19)), (day(20), day(39)), n_bootstrap=2000, seed=1)
+    pre_orders = df["orders"].to_numpy()[:20]
+    idx = np.random.default_rng(1).integers(0, 20, size=(2000, 20))
+    expected_zero = int((pre_orders[idx].sum(axis=1) == 0).sum())
+    assert expected_zero > 0
+    assert r.rel_change is None
+    assert f"{expected_zero} of 2000 bootstrap resamples had zero orders" in r.rel_change_unavailable_reason
+    assert "The relative change is not reported" in r.summary
+    assert r.abs_change_pp is not None and r.abs_change_pp.level == 0.95  # the absolute change is unaffected
+
+
+def test_relative_interval_is_withheld_when_the_before_rate_is_zero():
+    orders = np.r_[np.zeros(14, dtype=int), np.full(14, 30)]
+    r = confirm_change(to_frame(np.full(28, 1_000), orders), (day(0), day(13)), (day(14), day(27)), n_bootstrap=300)
+    assert r.rel_change is None and "'before' conversion is zero" in r.rel_change_unavailable_reason
+    assert r.is_real  # a real change from zero is still confirmed in absolute terms
+
+
+def test_relative_interval_is_present_when_no_resample_has_zero_before_orders(result):
+    assert result.rel_change is not None and result.rel_change_unavailable_reason is None
+
+
+def test_insufficient_data_explains_the_missing_relative_interval(reference):
+    r = confirm_change(reference[0], ("2026-06-01", "2026-06-30"), ("2026-10-14", "2026-10-31"))
+    assert r.rel_change is None and r.rel_change_unavailable_reason
+
+
+# Finding 5: interval labels come from the requested level.
+
+
+@pytest.mark.parametrize(("level", "label"), [(0.8, "80%"), (0.9, "90%"), (0.975, "97.5%"), (0.99, "99%")])
+def test_custom_confidence_levels_are_labelled_correctly(level, label):
+    df = bounded_series(1, 56, step_day=28, step=-0.1)
+    r = confirm_change(df, (day(0), day(27)), (day(28), day(55)), level=level, n_bootstrap=400)
+    assert f"{label} CI" in r.summary and "95% CI" not in r.summary
+    assert r.abs_change_pp.level == level and r.pre.conversion.level == level and r.rel_change.level == level
+
+
+def test_a_wider_level_never_gives_a_narrower_interval():
+    df = bounded_series(1, 56, step_day=28, step=-0.1)
+    widths = []
+    for level in (0.5, 0.8, 0.95, 0.99):
+        iv = confirm_change(df, (day(0), day(27)), (day(28), day(55)), level=level, n_bootstrap=400, seed=2).abs_change_pp
+        widths.append(iv.upper - iv.lower)
+    assert widths == sorted(widths)

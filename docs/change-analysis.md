@@ -48,23 +48,36 @@ Windows are inclusive `(start, end)` dates; the pre window must end before the p
 (`ValueError` otherwise). `n_bootstrap >= 200`, `1e-12 <= alpha <= 0.5`.
 
 - **Before / after** are pooled conversion rates (total orders ÷ total sessions) over each window's
-  usable days, as fractions. Their **95% bootstrap intervals resample days** with replacement
-  (percentile method). The **absolute change** (percentage points) and **relative change**
-  (fraction) get intervals from the same resamples of both windows. If a percentile interval would
+  usable days, as fractions. Their **bootstrap intervals resample days** with replacement
+  (percentile method, 95% by default; every label in the summary is generated from the `level`
+  actually requested, so `level=0.8` prints "80% CI"). The **absolute change** (percentage points)
+  gets its interval from the same resamples of both windows.
+- **Relative change is withheld rather than approximated.** `after / before − 1` is unbounded in any
+  resample whose 'before' window has zero orders, and dropping those draws would bias the interval
+  toward values that look tidy. So if the observed 'before' rate is zero, or *any* resample has zero
+  'before' orders, `rel_change` is `None` and `rel_change_unavailable_reason` says why (including how
+  many of the resamples were affected); the summary says the relative change is not reported. The
+  absolute change is unaffected. Sparse data (a few dozen orders per window) is where this happens. If a percentile interval would
   not contain its own point estimate (a strongly skewed bootstrap), it is widened to include it, and
   that is noted in the assumptions.
-- **Noise test.** A Welch t-test on the **day-level rates**, reported with its effect size measured
-  against the **pre-period's own variability**: `(mean daily rate after − before) / sd of pre-period
-  daily rates` (Requirement 2.2), plus both windows' daily sd in pp, `t`, Welch degrees of freedom
-  and the p-value. A p-value is never reported without that effect size.
+- **Noise test, on the same quantity.** The estimates are pooled rates (total orders ÷ total
+  sessions), so the test targets the pooled rate too, with days as the sampling units. Each window's
+  pooled rate has the ratio-estimator variance `n/(n−1) · Σ(orders_i − R·sessions_i)² / (Σ sessions)²`,
+  and the difference is tested with a t statistic and Welch degrees of freedom
+  (`welch_t_on_pooled_rate_ratio_estimator`). The **effect size** is the pooled change divided by the
+  pre-period's own day-to-day sd (Requirement 2.2), taken session-weighted about the pooled rate, and a
+  p-value is never reported without it. The estimate, bootstrap interval, t-test, effect size and the
+  data-needed calculation therefore all describe one number. (An earlier version tested equal-weight
+  means of daily rates while reporting pooled rates; with uneven daily traffic the two can disagree
+  in size and even in direction, so the test could call an unchanged pooled rate "real".)
 - **Verdict.** `is_real` only if the bootstrap interval for the absolute change excludes 0 **and**
-  the Welch p-value is below `alpha`. If they disagree the result is *not distinguishable from
+  the t-test p-value is below `alpha`. If they disagree the result is *not distinguishable from
   noise* and the note says they disagree (the conservative reading). `stop_investigation` is true
   unless the change is real (Requirement 2.3).
-- **How much more data (2.3).** When not real, `data_needed` gives the smallest change detectable
-  with 80% power at the current number of days, and the days per window needed to detect the
-  *observed* change (equal-size windows, Welch variances): both assume the observed variability
-  persists. If the observed change is essentially zero it says more of the same data will not help.
+- **How much more data (2.3).** When not real, `data_needed` gives the smallest pooled change
+  detectable with 80% power at the current number of days, and the days per window needed to detect
+  the *observed* pooled change (equal-size windows, the same ratio-estimator variances, which scale as
+  1/n): both assume the observed variability persists. If the observed change is essentially zero it says more of the same data will not help.
 - **Weekday mix.** The windows' weekday mixes are compared (total-variation distance); a distance
   over 0.1 is added to the assumptions because part of a difference could be weekday seasonality,
   which `confirm_change` does not remove.
@@ -76,8 +89,8 @@ flagged and missing, and which flagged dates were removed. Windows outside the d
 insufficient, not an error.
 
 **Edge cases.** Windows with identical daily rates (zero variability, tested with a relative float
-tolerance so rounding noise does not fake a spread) get `p = 0` if their levels differ and `p = 1`
-if not, with no effect size; infinite or NaN values never appear in results (JSON-safe).
+tolerance so rounding noise does not fake a spread) get `p = 0` if their pooled rates differ and
+`p = 1` if not, with no effect size; infinite or NaN values never appear in results (JSON-safe).
 
 ## `detect_change_point` (3.1–3.2)
 
@@ -112,8 +125,22 @@ detect_change_point(metrics, events=None, *, segment=None, search_window=None, q
 6. **Insufficient data is explicit**: fewer than `2 × min_segment_days` usable days gives
    `status = "insufficient_data"` with the usable count and the removed flagged dates.
 
-A perfect step (no residual noise) makes the residual sd undefined; the shift is then reported as
-`None` and the summary says so, never as NaN or infinity.
+**Numerical safeguards.**
+
+- *Stable arithmetic.* Split costs are computed on the centred series, so rounding error scales with
+  the variation in the data rather than its level. (Computing `Σy² − (Σy)²/k` directly on identical
+  values near 0.03 left residue far above the true cost of zero, which produced a "certain" change.)
+- *Scale-aware equality.* Values closer than `REL_TOL = 1e-9` times the series magnitude are equal.
+  A series with no variation (to that tolerance, including after the weekday pattern is removed)
+  returns `status = "ok"`, `change_detected = False`, `best_date = None`, an empty plausible set,
+  `p_value_adjusted = 1.0` and the summary "No change point exists"; no events are matched.
+- *Perfect step.* A fit with no residual noise (cost within the same tolerance) makes the residual
+  sd undefined: the shift is reported as `None` with `p = 0`, and only splits that also fit exactly are
+  plausible. Never NaN or infinity.
+- *Zero conversion.* Multiplicative weekday factors are undefined when a fitted level is zero or a
+  weekday's average conversion is zero (all-zero series, a step from or to zero orders, a weekday with
+  no orders). The fit then falls back to no weekday adjustment and the result says
+  "fell back to no adjustment: ..." with the reason, instead of failing.
 
 ## `match_event_candidates` (3.3)
 
@@ -180,6 +207,11 @@ Limitations:
 - **Exclusions can remove real days.** Flagged days with truncated baselines near the ends of the
   data may be genuine post-change days; they are disclosed, not recovered. Volume anomalies of any
   cause above 40% are excluded as well.
+- **Sparse data.** With very few orders per window the relative change is withheld (see above) and
+  the t-test's normal approximation is weak; treat results on a few dozen orders as indicative.
+- **Supported magnitude.** Counts and the total of either count column across all rows must not exceed
+  2**53 − 1 (checked in the Task 2 loader, with a typed error), so daily, segment and window totals
+  are exact and cannot wrap.
 - **Defaults come from simulated data** and need re-checking on real data.
 
 ## Tests
@@ -187,6 +219,9 @@ Limitations:
 - `tests/test_series.py`, `test_confirm_change.py`, `test_change_point.py`, `test_candidates.py`:
   unit tests, including independent recomputation of the pooled rates, disclosure of excluded days,
   insufficient-data paths, the uncertain historical-only context, gaps at the change, and wording.
+  Regression tests for each PR #3 review finding (constant and zero-conversion series, a pooled
+  estimand shared by estimate/test/effect size/power with independent recomputation, withheld relative
+  intervals, interval labels, aggregate overflow) were each checked to fail on the previous commit.
 - `tests/test_change_properties.py`: Hypothesis properties on **bounded** fixtures that hold for
   every draw (exact location of a large step, plausible set contains the best date and nests as the
   level rises, every interval ordered, determinism and row-order invariance, lowering post orders

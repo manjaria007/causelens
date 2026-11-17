@@ -77,7 +77,7 @@ def test_every_confirm_change_interval_is_ordered_and_consistent(seed, step, spl
         assert iv.lower <= iv.estimate <= iv.upper
     assert r.pre.n_days_used == split and r.post.n_days_used == 70 - split
     assert r.abs_change_pp.estimate == pytest.approx(100 * (r.post.conversion.estimate - r.pre.conversion.estimate))
-    assert r.is_real == (r.noise_test.welch_significant and r.noise_test.bootstrap_excludes_zero)
+    assert r.is_real == (r.noise_test.test_significant and r.noise_test.bootstrap_excludes_zero)
     assert r.stop_investigation == (not r.is_real)
 
 
@@ -149,3 +149,37 @@ def test_confirm_change_false_positive_and_detection_rates():
     assert null / len(SEEDS) <= 0.08, f"{null}/{len(SEEDS)} null comparisons called real"
     power = sum(run(s, -0.10) for s in SEEDS)
     assert power / len(SEEDS) >= 0.97, f"{power}/{len(SEEDS)} 10% drops confirmed"
+
+
+# ------------------------------------------------------------------ robustness (PR #3 review)
+
+
+@settings(max_examples=60, **COMMON)
+@given(
+    n=st.integers(14, 70),
+    sessions=st.integers(1, 10**9),
+    share=st.floats(0.0, 1.0),
+    zero_pattern=st.lists(st.booleans(), min_size=7, max_size=7),
+    seed=st.integers(0, 2**31 - 1),
+)
+def test_zero_heavy_and_constant_series_always_return_a_clean_result(n, sessions, share, zero_pattern, seed):
+    """Constant rates (any magnitude, including zero) and zero-order weekdays never crash, never give
+    NaN/inf in the result, and a constant series never reports a change."""
+    import numpy as np
+    from frames import to_frame
+
+    from causelens.analytics import detect_change_point
+
+    orders = np.full(n, int(sessions * share))
+    wd = np.arange(n) % 7
+    varied = orders.copy()
+    varied[np.array(zero_pattern)[wd]] = 0
+    for flat, values in ((True, orders), (False, varied)):
+        for adjust in (False, True):
+            r = detect_change_point(to_frame(np.full(n, sessions), values), apply_exclusions=False, adjust_weekdays=adjust)
+            assert r.status == "ok" and r.p_value_adjusted is not None and 0.0 <= r.p_value_adjusted <= 1.0
+            assert "NaN" not in r.model_dump_json() and "Infinity" not in r.model_dump_json()
+            if flat:
+                assert not r.change_detected and r.best_date is None
+            if r.change_detected:
+                assert r.best_date in r.plausible_dates

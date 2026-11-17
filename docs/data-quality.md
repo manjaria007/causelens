@@ -26,6 +26,13 @@ fractions, booleans, complex numbers (including `100+0j`), NaN, infinity, missin
 holds exactly, and far below int64); larger values, including absurd exponents like `"1e999999999"`
 (rejected without being expanded), are rejected so they can never wrap or round.
 
+**Aggregate limit.** Valid rows can still overflow once summed (1,025 rows at the per-count maximum
+add up past 2**63 and wrapped negative in downstream daily totals). So the **total** of `sessions`,
+and of `orders`, across all rows must also be at most `MAX_COUNT`; otherwise a typed error says
+"total sessions across all rows (N) exceeds the supported aggregate maximum". Every analysis entry
+point validates its input, so none can see a wrapped total, and any daily, segment or window sum is
+exact in both int64 and float64. The total is computed exactly (floats are only a quick pre-check).
+
 **CSV structure.** Files are read with the `csv` module in strict mode, not `pandas.read_csv`.
 Every record must have exactly as many fields as the header: a row with an extra leading field
 (which pandas would treat as an index), a short row, or an extra trailing field is a typed error
