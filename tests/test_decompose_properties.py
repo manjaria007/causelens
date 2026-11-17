@@ -226,6 +226,34 @@ def _map_label(label: str, mapping: dict[str, dict[str, str]]) -> str:
     return ", ".join(parts)
 
 
+def _named_set(chosen, mapping):
+    if chosen is None:
+        return None
+    out = chosen.model_dump(exclude={"segments", "note", "interchangeable_with"})
+    out["segments"] = sorted(_map_label(lab, mapping) if mapping else lab for lab in chosen.segments)
+    return out
+
+
+def _numeric_set(chosen, by_label):
+    """Label-free form of a local set: identical segments are interchangeable, so which one is *named* may
+    follow label order, but what is selected (counts, outcome, numbers) may not."""
+    if chosen is None:
+        return None
+    out = chosen.model_dump(exclude={"segments", "note", "interchangeable_with"})
+    out["members"] = sorted(
+        (
+            by_label[lab].sessions_pre,
+            by_label[lab].sessions_post,
+            by_label[lab].orders_pre,
+            by_label[lab].orders_post,
+            bool(by_label[lab].test and by_label[lab].test.significant),
+        )
+        for lab in chosen.segments
+    )
+    out["n_interchangeable"] = len(chosen.interchangeable_with)
+    return out
+
+
 def canonical(result, mapping=None):
     """Everything numeric in a result, keyed by (partition, segment labels), with labels renamed."""
 
@@ -239,25 +267,17 @@ def canonical(result, mapping=None):
             tuple((d, rename(d, s.labels[d])) for d in p.dimensions): s.model_dump(exclude={"labels", "label"})
             for s in p.segments
         }
-        def canon_set(chosen):
-            if chosen is None:
-                return None
-            out = chosen.model_dump(exclude={"segments", "note"})
-            out["segments"] = sorted(_map_label(lab, mapping) if mapping else lab for lab in chosen.segments)
-            return out
-
+        by_label = {s.label: s for s in p.segments}
         parts[p.name] = (
             p.model_dump(exclude={"segments", "explaining_set", "local_set"}),
             segs,
-            canon_set(p.explaining_set),
-            canon_set(p.local_set),
+            _named_set(p.explaining_set, mapping),
+            _numeric_set(p.local_set, by_label),
         )
     loc = None
     if result.localization is not None:
         loc = result.localization.model_dump(exclude={"segments", "statement"})
-        loc["segments"] = sorted(
-            _map_label(lab, mapping) if mapping else lab for lab in result.localization.segments
-        )
+        loc["n_segments"] = len(result.localization.segments)
     return top, parts, loc, result.localization_note is None
 
 
@@ -283,36 +303,28 @@ def test_relabeling_really_changes_the_order_it_is_meant_to_test():
 # ------------------------------------------------------------------ localization search and test reliability
 
 
-@settings(max_examples=40, **COMMON)
-@given(
-    df=frames,
-    threshold=st.sampled_from([0.5, 0.8, 1.0]),
-    limit=st.sampled_from([0.2, 0.35, 0.5, 0.8]),
-)
-def test_local_set_matches_a_brute_force_search_over_all_combinations(df, threshold, limit):
-    """Soundness, completeness and optimality: whenever any combination of positively contributing segments
-    reaches the target within the traffic limit, a local set is reported, and it is the best by the stated
-    order (all significant, fewest segments, least traffic, largest contribution)."""
+def check_local_set_against_brute_force(df: pd.DataFrame, threshold: float, limit: float) -> None:
+    """Soundness, completeness and optimality against an exhaustive search over every subset of the individual
+    positively contributing segments: whenever any combination reaches the target within the traffic limit a
+    local set is reported, and it is the best by the stated order (all significant, fewest segments, least
+    traffic, largest contribution). Segments are not grouped here, so this also checks that grouping
+    interchangeable segments never hides a combination."""
     r = run(df, explain_threshold=threshold, max_localized_traffic_share=limit)
     assume(abs(r.change_pp) > 1e-9)
     sign = 1.0 if r.change_pp > 0 else -1.0
     target = threshold * abs(r.change_pp)
     for p in r.partitions:
-        groups: dict[tuple, list] = {}
-        for s in p.segments:
-            if sign * s.contribution_pp > 0:
-                groups.setdefault((s.sessions_pre, s.sessions_post, s.orders_pre, s.orders_post), []).append(s)
-        atoms = list(groups.values())
-        assert len(atoms) <= 12 and p.local_search_exhaustive
+        positives = [s for s in p.segments if sign * s.contribution_pp > 0]
+        assume(len(positives) <= 11)
+        assert p.local_search_exhaustive
         best = None
-        for k in range(1, len(atoms) + 1):
-            for combo in itertools.combinations(atoms, k):
-                chosen = [s for atom in combo for s in atom]
-                contribution = math.fsum(sign * s.contribution_pp for s in chosen)
-                traffic = math.fsum(s.share_post for s in chosen)
+        for k in range(1, len(positives) + 1):
+            for combo in itertools.combinations(positives, k):
+                contribution = math.fsum(sign * s.contribution_pp for s in combo)
+                traffic = math.fsum(s.share_post for s in combo)
                 if contribution >= target * (1 - 1e-12) and traffic <= limit * (1 + 1e-12):
-                    unsure = any(not (s.test is not None and s.test.significant) for s in chosen)
-                    key = (unsure, len(chosen), traffic, -contribution)
+                    unsure = any(not (s.test is not None and s.test.significant) for s in combo)
+                    key = (unsure, k, traffic, -contribution)
                     best = key if best is None or key < best else best
         if best is None:
             assert p.local_set is None and p.local_set_unavailable_reason
@@ -323,6 +335,7 @@ def test_local_set_matches_a_brute_force_search_over_all_combinations(df, thresh
         assert ls.traffic_share_post == pytest.approx(best[2], abs=1e-9)
         assert ls.traffic_share_post <= limit + 1e-9
         assert sign * ls.selected_share_of_change * r.change_pp >= target - 1e-9
+        assert len(set(ls.segments)) == len(ls.segments) and not set(ls.segments) & set(ls.interchangeable_with)
     # a localization exists exactly when some partition has a local set, and it comes from one
     has_any = any(p.local_set is not None for p in r.partitions)
     assert (r.localization is not None) == has_any
@@ -332,8 +345,56 @@ def test_local_set_matches_a_brute_force_search_over_all_combinations(df, thresh
 
 
 @settings(max_examples=40, **COMMON)
+@given(
+    df=frames,
+    threshold=st.sampled_from([0.5, 0.8, 1.0]),
+    limit=st.sampled_from([0.2, 0.35, 0.5, 0.8]),
+)
+def test_local_set_matches_a_brute_force_search_over_all_combinations(df, threshold, limit):
+    check_local_set_against_brute_force(df, threshold, limit)
+
+
+def with_twins(df: pd.DataFrame, which: int, second: int) -> pd.DataFrame:
+    """Copy every row of one device (and optionally another) under a new label: twin segments with identical
+    counts in every partition, which random data almost never produces."""
+    devices = sorted(df["device"].unique())
+    extra = []
+    for n, pick in enumerate((which, second)):
+        if n == 1 and second < 0:
+            continue
+        source = devices[pick % len(devices)]
+        extra.append(df[df["device"] == source].assign(device=f"{source}_twin{n}"))
+    return pd.concat([df, *extra], ignore_index=True)
+
+
+@settings(max_examples=40, **COMMON)
+@given(
+    df=frames,
+    which=st.integers(0, 5),
+    second=st.integers(-1, 5),
+    threshold=st.sampled_from([0.5, 0.8, 1.0]),
+    limit=st.sampled_from([0.2, 0.35, 0.5, 0.8]),
+)
+def test_local_set_with_twin_segments_matches_brute_force_and_never_forces_twins_together(df, which, second, threshold, limit):
+    twins = with_twins(df, which, second)
+    check_local_set_against_brute_force(twins, threshold, limit)
+
+
+def active_days(df: pd.DataFrame, partition_dims: list[str], labels: dict[str, str]) -> tuple[int, int]:
+    """Days with sessions for one segment in each window, computed independently from the raw frame."""
+    rows = df
+    for d in partition_dims:
+        rows = rows[rows[d] == labels[d]]
+    daily = rows.groupby("date")["sessions"].sum()
+    daily = daily[daily > 0]
+    return int((daily.index <= PRE[1]).sum()), int((daily.index >= POST[0]).sum())
+
+
+@settings(max_examples=40, **COMMON)
 @given(df=frames)
 def test_unreliable_segments_never_get_a_p_value_q_value_or_significance(df):
+    """Unreliable means sparse counts (an expected cell below 5) or too few days with sessions (under 3 in a
+    window); either way no p-value, q-value or significance, and no place in the FDR family."""
     r = run(df)
     n_reliable = 0
     for p in r.partitions:
@@ -345,15 +406,21 @@ def test_unreliable_segments_never_get_a_p_value_q_value_or_significance(df):
             c0, n0, c1, n1 = s.orders_pre, s.sessions_pre, s.orders_post, s.sessions_post
             pooled = (c0 + c1) / (n0 + n1)
             expected_min = min(n0 * pooled, n0 * (1 - pooled), n1 * pooled, n1 * (1 - pooled))
-            assert s.test.reliable == (expected_min >= 5.0)
+            days = active_days(df, p.dimensions, s.labels)
+            assert (s.test.active_days_pre, s.test.active_days_post) == days
+            should_be_reliable = expected_min >= 5.0 and min(days) >= 3
+            assert s.test.reliable == should_be_reliable
             if s.test.reliable:
                 n_reliable += 1
-                assert s.test.p_value is not None and s.test.q_value is not None and s.test.basis != "none"
+                assert s.test.p_value is not None and s.test.q_value is not None and s.test.basis == "day_level_welch_t"
                 assert 0 <= s.test.p_value <= 1 and s.test.q_value >= s.test.p_value - 1e-12
                 assert s.test.significant == (s.test.q_value < 0.05)
+                assert (s.test.day_level.n_days_pre, s.test.day_level.n_days_post) == days  # active days, not window days
+                assert s.test.day_level.std_error_pp > 0 and s.test.change_pp.lower < s.test.change_pp.upper
             else:
                 assert s.test.p_value is None and s.test.q_value is None and s.test.q_value_scan is None
                 assert s.test.significant is False and s.test.basis == "none" and s.test.p_value_exact is not None
+                assert s.test.unreliable_reason == ("sparse_counts" if expected_min < 5.0 else "too_few_active_days")
     assert r.n_tests_scanned == n_reliable
 
 

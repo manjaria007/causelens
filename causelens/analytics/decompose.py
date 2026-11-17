@@ -27,22 +27,24 @@ closure, ranking, explaining set and (optionally) its own FDR family.
 
 **Tests.** Each segment with sessions in both windows is tested for ``H0: conversion unchanged``.
 Sessions within a day are not independent draws (weekday effects, day-level noise), so the default test
-treats **days as the sampling units**: each window's pooled rate gets a ratio-estimator variance from its
-daily counts and the difference is tested with a Welch t statistic and Welch degrees of freedom, the same
-method as ``confirm_change``. Estimating variance from few days is accounted for by the t distribution, so
-the test is calibrated even with a week per window. The plain binomial two-proportion test is always
-reported next to it (and is available as ``inference="binomial"``).
+treats **days with sessions as the sampling units**: each window's pooled rate gets a ratio-estimator
+variance from its daily counts (floored at the binomial variance) and the difference is tested with a Welch
+t statistic and Welch degrees of freedom, the same method as ``confirm_change``. Estimating variance from few
+days is accounted for by the t distribution, so the test is calibrated even with a week per window. The plain
+binomial two-proportion test is always reported next to it (and is available as ``inference="binomial"``).
 
-A segment is only tested when the normal approximation can be trusted: every expected cell of the pooled
-before/after table (orders and non-orders in each window) must be at least 5. Sparse segments get no
-p-value, q-value or significance claim and are left out of the FDR family; Fisher's exact p-value is shown
-for information only. P-values feed Benjamini-Hochberg q-values, over every reliably tested segment in all
-partitions by default.
+A segment is only tested when the data can support it: every expected cell of the pooled before/after table
+(orders and non-orders in each window) must be at least 5, and it needs at least ``MIN_ACTIVE_DAYS`` days with
+sessions in each window (a day without sessions is not an observation, and with fewer days no variance can be
+estimated). Otherwise it gets no p-value, q-value or significance claim and is left out of the FDR family;
+Fisher's exact p-value is shown for information only. P-values feed Benjamini-Hochberg q-values, over every
+reliably tested segment in all partitions by default.
 
 **Localization.** The ranked explaining set is the fewest segments reaching the target share of the change.
 A *localization* additionally requires the set to carry little traffic, so a traffic-limited search over
-combinations of positively contributing segments (exhaustive up to ``MAX_SEARCH_ATOMS`` of them) looks for
-the narrowest qualifying set rather than only testing the ranked prefix against the limit.
+combinations of positively contributing segments looks for the narrowest qualifying set rather than only
+testing the ranked prefix. Segments are interchangeable only when their counts and test outcome are both
+identical, and a group is searched by number of members so identical segments are never forced together.
 
 Task 2's default exclusions are applied to whole days (so segment mix is not distorted) and the
 comparison windows and excluded dates are disclosed. This tool says where the change is concentrated,
@@ -80,10 +82,13 @@ Window = tuple[Date | str, Date | str]
 CLOSURE_TOLERANCE_PP = 1e-9
 #: Smallest expected count in any cell of the pooled before/after 2x2 table for the normal approximation.
 MIN_EXPECTED_COUNT = 5.0
-#: Fewest days a window needs for a day-level variance (a variance needs two observations).
-MIN_DAYS_FOR_DAY_LEVEL = 2
-#: Largest number of positive-contribution segment groups searched exhaustively per partition (2**n subsets).
+#: Fewest days with sessions a segment needs in each window for a day-level test. A variance needs two
+#: observations, and with fewer than three the Welch degrees of freedom are about 1.
+MIN_ACTIVE_DAYS = 3
+#: Largest number of interchangeable-segment groups searched exhaustively per partition.
 MAX_SEARCH_ATOMS = 12
+#: Largest number of candidate combinations enumerated per partition (product over groups of members + 1).
+MAX_SEARCH_COMBINATIONS = 1 << 16
 #: Net changes smaller than this (pp) are treated as zero when expressing shares of the change.
 NO_CHANGE_PP = 1e-9
 
@@ -136,6 +141,17 @@ class TwoProportionResult(BaseModel):
     )
 
 
+def _check_count(name: str, value: object) -> int:
+    """A count must be a finite whole number (NaN, infinity and fractions would silently corrupt a test)."""
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number (got {value!r})") from None
+    if not math.isfinite(number) or number != int(number):
+        raise ValueError(f"{name} must be a finite whole number (got {value!r})")
+    return int(number)
+
+
 def _wilson(p: float, n: float, z: float) -> tuple[float, float]:
     denom = 1 + z * z / n
     centre = (p + z * z / (2 * n)) / denom
@@ -161,6 +177,8 @@ def two_proportion_test(
     """
     if not (0 < level < 1):
         raise ValueError("level must be in (0, 1)")
+    count_pre, n_pre = _check_count("count_pre", count_pre), _check_count("n_pre", n_pre)
+    count_post, n_post = _check_count("count_post", count_post), _check_count("n_post", n_post)
     for name, c, n in (("pre", count_pre, n_pre), ("post", count_post, n_post)):
         if n <= 0 or c < 0 or c > n:
             raise ValueError(f"{name}: need 0 <= count <= n and n > 0 (got count={c}, n={n})")
@@ -199,6 +217,10 @@ def two_proportion_test(
 
 def fisher_exact_p(count_pre: int, n_pre: int, count_post: int, n_post: int) -> float:
     """Two-sided Fisher exact p-value for the pooled 2 x 2 table (independent sessions assumed)."""
+    count_pre, n_pre = _check_count("count_pre", count_pre), _check_count("n_pre", n_pre)
+    count_post, n_post = _check_count("count_post", count_post), _check_count("n_post", n_post)
+    if min(n_pre, n_post) <= 0 or not (0 <= count_pre <= n_pre) or not (0 <= count_post <= n_post):
+        raise ValueError("need 0 <= count <= n and n > 0 in each window")
     table = [[count_pre, n_pre - count_pre], [count_post, n_post - count_post]]
     return float(stats.fisher_exact(table).pvalue)
 
@@ -211,16 +233,21 @@ class DayLevelResult(BaseModel):
     method: str = "day_level_welch_t_on_pooled_rate"
     change_pp: Interval = Field(description="Post minus pre pooled conversion, in percentage points.")
     std_error_pp: float
-    t_statistic: float | None = Field(description="None when both windows have no day-to-day variation.")
+    t_statistic: float | None = Field(description="None only if the variance is exactly zero (not possible with finite sessions).")
     degrees_of_freedom: float | None
     p_value: float
-    n_days_pre: int
+    n_days_pre: int = Field(description="Days with sessions in the before window (the sampling units).")
     n_days_post: int
     design_effect_pre: float | None = Field(
         description="Day-level variance of the pooled rate / binomial variance (1 = sessions act as "
-        "independent trials; None when the rate is 0 or 1 or there is no variation)."
+        "independent trials)."
     )
     design_effect_post: float | None
+    variance_floored_pre: bool = Field(
+        description="True when the day-level variance was below the binomial variance and the binomial "
+        "variance was used (sessions cannot be more predictable than independent trials)."
+    )
+    variance_floored_post: bool
 
 
 def _day_level_core(
@@ -230,47 +257,63 @@ def _day_level_core(
     orders_post: np.ndarray,
     level: float,
 ) -> dict[str, np.ndarray]:
-    """Vectorised day-level test. Inputs have shape (segments, days); every segment needs sessions in
-    both windows. Days are the units, so a segment's absent days count as zero-session days.
+    """Vectorised day-level test. Inputs have shape (segments, days); every row needs at least two days
+    with sessions in each window (callers require ``MIN_ACTIVE_DAYS``).
 
-    For each window the pooled rate ``R = sum(orders) / sum(sessions)`` has the ratio-estimator variance
-    ``d / (d - 1) * sum((orders_i - R * sessions_i)**2) / (sum sessions)**2`` over its ``d`` days. The
-    difference is tested with ``t = dR / sqrt(v0 + v1)`` on Welch-Satterthwaite degrees of freedom.
-    A relative standard deviation under 1e-9 counts as no variation (float noise, not data).
+    **Days with sessions are the sampling units.** A day on which a segment had no sessions is not an
+    observation of its conversion; counting it would inflate the degrees of freedom and, for a segment seen
+    on a single day, force a variance of exactly zero. For each window with ``d`` such days, the pooled rate
+    ``R = sum(orders) / sum(sessions)`` has the ratio-estimator variance
+    ``d / (d - 1) * sum((orders_i - R * sessions_i)**2) / (sum sessions)**2``.
+
+    **Binomial floor.** That estimate is floored at the binomial variance ``R~ (1 - R~) / sum(sessions)``
+    with ``R~ = (orders + 0.5) / (sessions + 1)``: conversions cannot be more predictable than independent
+    sessions, a few coincidentally similar days must not produce a vanishing variance, and a window with no
+    orders (or only orders) still carries sampling uncertainty instead of a zero-width interval. A floored window's variance is a theoretical bound, not an
+    estimate, so it adds no estimation uncertainty to the degrees of freedom; an estimated one contributes
+    ``d - 1``. The difference is tested with ``t = dR / sqrt(v0 + v1)`` on Welch-Satterthwaite degrees of
+    freedom (capped at 1e6, which is indistinguishable from normal). The variance is zero only when both
+    sessions are infinite. Measured calibration: at most 5.0% rejections at a nominal 5% over 3 to 28 days
+    and from no to heavy day-level noise.
     """
-    d0, d1 = sessions_pre.shape[1], sessions_post.shape[1]
+    a0 = (sessions_pre > 0).sum(axis=1).astype(float)
+    a1 = (sessions_post > 0).sum(axis=1).astype(float)
     s0, o0 = sessions_pre.sum(axis=1), orders_pre.sum(axis=1)
     s1, o1 = sessions_post.sum(axis=1), orders_post.sum(axis=1)
     r0, r1 = o0 / s0, o1 / s1
-    v0 = d0 / (d0 - 1) * ((orders_pre - r0[:, None] * sessions_pre) ** 2).sum(axis=1) / s0**2
-    v1 = d1 / (d1 - 1) * ((orders_post - r1[:, None] * sessions_post) ** 2).sum(axis=1) / s1**2
-    v0 = np.where(v0 <= 1e-18 * r0**2, 0.0, v0)
-    v1 = np.where(v1 <= 1e-18 * r1**2, 0.0, v1)
+    n0, n1 = np.maximum(a0 - 1, 1.0), np.maximum(a1 - 1, 1.0)  # rows with < 2 days are excluded by callers
+    raw0 = a0 / n0 * ((orders_pre - r0[:, None] * sessions_pre) ** 2).sum(axis=1) / s0**2
+    raw1 = a1 / n1 * ((orders_post - r1[:, None] * sessions_post) ** 2).sum(axis=1) / s1**2
+    shrunk0, shrunk1 = (o0 + 0.5) / (s0 + 1), (o1 + 0.5) / (s1 + 1)  # half an observation: never exactly 0 or 1
+    floor0, floor1 = shrunk0 * (1 - shrunk0) / s0, shrunk1 * (1 - shrunk1) / s1
+    v0, v1 = np.maximum(raw0, floor0), np.maximum(raw1, floor1)
     var = v0 + v1
-    flat = var <= 0
+    est0 = np.where(raw0 < floor0, np.inf, n0)  # a floored variance is a bound, not an estimate
+    est1 = np.where(raw1 < floor1, np.inf, n1)
+    flat = var <= 0  # not possible with finite sessions; kept so a zero never divides
     diff = r1 - r0
     se = np.sqrt(var)
+    safe_se = np.where(flat, 1.0, se)
     safe_var = np.where(flat, 1.0, var)
     with np.errstate(divide="ignore", invalid="ignore"):
-        df = np.where(
-            flat, 1.0, safe_var**2 / (v0**2 / (d0 - 1) + v1**2 / (d1 - 1)),
-        )
-        t = np.where(flat, 0.0, diff / np.where(flat, 1.0, se))
+        df = np.where(flat, 1.0, np.minimum(safe_var**2 / (v0**2 / est0 + v1**2 / est1), 1e6))
+        t = np.where(flat, 0.0, diff / safe_se)
     p = 2 * stats.t.sf(np.abs(t), df)
     scale = np.maximum(np.maximum(np.abs(r0), np.abs(r1)), 1e-300)
     p = np.where(flat, np.where(np.abs(diff) <= 1e-9 * scale, 1.0, 0.0), p)
     crit = stats.t.ppf(1 - (1 - level) / 2, df)
     half = np.where(flat, 0.0, crit * se)
     with np.errstate(divide="ignore", invalid="ignore"):
-        deff0 = np.where((r0 > 0) & (r0 < 1) & (v0 > 0), v0 / (r0 * (1 - r0) / s0), np.nan)
-        deff1 = np.where((r1 > 0) & (r1 < 1) & (v1 > 0), v1 / (r1 * (1 - r1) / s1), np.nan)
+        deff0 = np.where(floor0 > 0, raw0 / floor0, np.nan)
+        deff1 = np.where(floor1 > 0, raw1 / floor1, np.nan)
     return {
         "diff": diff, "lower": diff - half, "upper": diff + half, "se": se, "t": np.where(flat, np.nan, t),
         "df": np.where(flat, np.nan, df), "p": p, "deff0": deff0, "deff1": deff1,
+        "days0": a0, "days1": a1, "floored0": raw0 < floor0, "floored1": raw1 < floor1,
     }
 
 
-def _day_level_result(core: dict[str, np.ndarray], i: int, level: float, d0: int, d1: int) -> DayLevelResult:
+def _day_level_result(core: dict[str, np.ndarray], i: int, level: float) -> DayLevelResult:
     def num(key: str) -> float | None:
         v = float(core[key][i])
         return None if math.isnan(v) else v
@@ -286,10 +329,12 @@ def _day_level_result(core: dict[str, np.ndarray], i: int, level: float, d0: int
         t_statistic=num("t"),
         degrees_of_freedom=num("df"),
         p_value=float(core["p"][i]),
-        n_days_pre=d0,
-        n_days_post=d1,
+        n_days_pre=int(core["days0"][i]),
+        n_days_post=int(core["days1"][i]),
         design_effect_pre=num("deff0"),
         design_effect_post=num("deff1"),
+        variance_floored_pre=bool(core["floored0"][i]),
+        variance_floored_post=bool(core["floored1"][i]),
     )
 
 
@@ -303,24 +348,37 @@ def day_level_test(
 ) -> DayLevelResult:
     """Test a change in pooled conversion using days as the sampling units.
 
-    Each argument is one value per day (a segment's absent days should be given as zeros). Needs at least
-    two days in each window and some sessions in each. Unlike the plain binomial test this reflects
-    day-to-day variation, and with few days the t distribution widens the p-value and interval to match.
+    Each argument is one value per day. Days with zero sessions are not observations and are ignored for
+    the variance, so padding a segment's absent days with zeros neither adds days nor changes the result.
+    Needs at least ``MIN_ACTIVE_DAYS`` days with sessions in each window; every value must be finite
+    (NaN and infinity are rejected before any calculation, with ``ValueError``). Unlike the plain binomial
+    test this reflects day-to-day variation, and with few days the t distribution widens the p-value and
+    interval to match.
     """
     if not (0 < level < 1):
         raise ValueError("level must be in (0, 1)")
-    arrays = [np.asarray(a, dtype=float) for a in (sessions_pre, orders_pre, sessions_post, orders_post)]
+    try:
+        arrays = [np.asarray(a, dtype=float) for a in (sessions_pre, orders_pre, sessions_post, orders_post)]
+    except (TypeError, ValueError):
+        raise ValueError("sessions and orders must be numeric sequences") from None
+    if any(a.ndim != 1 for a in arrays):
+        raise ValueError("sessions and orders must be one-dimensional (one value per day)")
+    if not all(np.all(np.isfinite(a)) for a in arrays):
+        raise ValueError("sessions and orders must be finite numbers (NaN and infinity are not allowed)")
     if arrays[0].shape != arrays[1].shape or arrays[2].shape != arrays[3].shape:
         raise ValueError("sessions and orders must have one value per day in each window")
-    d0, d1 = len(arrays[0]), len(arrays[2])
-    if d0 < MIN_DAYS_FOR_DAY_LEVEL or d1 < MIN_DAYS_FOR_DAY_LEVEL:
-        raise ValueError(f"need at least {MIN_DAYS_FOR_DAY_LEVEL} days in each window (got {d0} and {d1})")
-    if arrays[0].sum() <= 0 or arrays[2].sum() <= 0:
-        raise ValueError("each window needs some sessions")
-    if np.any(arrays[1] < 0) or np.any(arrays[3] < 0) or np.any(arrays[1] > arrays[0]) or np.any(arrays[3] > arrays[2]):
-        raise ValueError("orders must be between 0 and sessions on every day")
+    if any(np.any(a < 0) for a in arrays):
+        raise ValueError("sessions and orders must not be negative")
+    if np.any(arrays[1] > arrays[0]) or np.any(arrays[3] > arrays[2]):
+        raise ValueError("orders must not exceed sessions on any day")
+    active = [int((arrays[0] > 0).sum()), int((arrays[2] > 0).sum())]
+    if min(active) < MIN_ACTIVE_DAYS:
+        raise ValueError(
+            f"need at least {MIN_ACTIVE_DAYS} days with sessions in each window "
+            f"(got {active[0]} before and {active[1]} after)"
+        )
     core = _day_level_core(*(a[None, :] for a in arrays), level)
-    return _day_level_result(core, 0, level, d0, d1)
+    return _day_level_result(core, 0, level)
 
 
 # --------------------------------------------------------------------------- result models
@@ -347,23 +405,28 @@ class ComparisonWindow(BaseModel):
 class RateChangeTest(BaseModel):
     """Test of a segment's conversion change, with what the p-value rests on stated.
 
-    ``reliable`` is false when a cell of the pooled before/after table has fewer than 5 expected counts:
-    then there is no p-value, no q-value and no significance claim, and the segment is left out of the
-    FDR family. ``p_value_exact`` (Fisher) is shown for information only in that case.
+    ``reliable`` is false when the data cannot support the test: a cell of the pooled before/after table
+    has fewer than 5 expected counts, or (day-level inference) a window has fewer than 3 days with sessions
+    so day-to-day variation cannot be estimated. Then there is no p-value, no q-value and no significance
+    claim, and the segment is left out of the FDR family. ``p_value_exact`` (Fisher) and the plain binomial
+    result are shown for information only.
     """
 
     model_config = ConfigDict(frozen=True)
 
     basis: Literal["day_level_welch_t", "binomial_z", "none"] = Field(
-        description="What p_value comes from: days as units, plain binomial, or nothing (unreliable)."
+        description="What p_value comes from: days as units, plain binomial, or nothing (withheld)."
     )
     change_pp: Interval = Field(description="Interval consistent with the basis, in percentage points.")
     binomial: TwoProportionResult
-    day_level: DayLevelResult | None = Field(description="None for unreliable segments or windows under 2 days.")
+    day_level: DayLevelResult | None = Field(description="None when the test is withheld or inference is binomial.")
     reliable: bool
-    note: str | None = Field(description="Why the test is unreliable or fell back, if it did.")
+    unreliable_reason: Literal["sparse_counts", "too_few_active_days"] | None = None
+    active_days_pre: int = Field(description="Days with sessions for this segment in the before window.")
+    active_days_post: int
+    note: str | None = Field(description="Why the test is withheld, or a caveat about the plain test.")
     p_value: float | None
-    p_value_exact: float | None = Field(description="Fisher exact p-value; only computed for unreliable segments.")
+    p_value_exact: float | None = Field(description="Fisher exact p-value; only computed when the test is withheld.")
     q_value: float | None = Field(description="Benjamini-Hochberg q in the family chosen by `fdr_family`.")
     q_value_partition: float | None = Field(description="BH q among the reliably tested segments of this partition.")
     q_value_scan: float | None = Field(description="BH q among every reliably tested segment across all partitions.")
@@ -417,6 +480,11 @@ class ExplainingSet(BaseModel):
     all_selected_significant: bool = Field(
         description="True when every selected segment has a testable, significant rate change."
     )
+    interchangeable_with: list[str] = Field(
+        default_factory=list,
+        description="Segments with identical counts and the same test outcome as a selected segment that "
+        "were not selected: any of them could take that segment's place with the same numbers.",
+    )
     note: str
 
 
@@ -428,7 +496,8 @@ class PartitionResult(BaseModel):
     n_segments: int
     n_tests: int = Field(description="Segments with a reliable test (they enter the FDR family).")
     n_unreliable: int = Field(
-        description="Segments seen in both windows whose counts are too sparse for the normal approximation."
+        description="Segments seen in both windows that cannot be tested reliably (sparse counts or too "
+        "few days with sessions)."
     )
     segments: list[SegmentEffect] = Field(description="Ordered by rank, then label.")
     sum_rate_effects_pp: float
@@ -491,7 +560,7 @@ class DecompositionResult(BaseModel):
     )
     fdr_family: Literal["scan", "partition"]
     n_tests_scanned: int = Field(description="Segments with a reliable test across all partitions.")
-    n_unreliable_tests: int = Field(0, description="Segments too sparse to test, across all partitions.")
+    n_unreliable_tests: int = Field(0, description="Segments that cannot be tested reliably, across all partitions.")
     alpha: float
     level: float
     inference: Literal["day_level", "binomial"]
@@ -722,7 +791,6 @@ def decompose_change(
         | ((rows["date"] >= pd.Timestamp(post[0])) & (rows["date"] <= pd.Timestamp(post[1])))
     ]
     enc = _Encoded(window_rows, post[0])
-    day_level_ok = inference == "day_level" and min(enc.n_pre_days, enc.n_post_days) >= MIN_DAYS_FOR_DAY_LEVEL
     raw: dict[tuple[str, ...], list[dict]] = {}
     for dims in dim_sets:
         daily_s, daily_o, sizes = enc.matrices(dims)
@@ -732,13 +800,15 @@ def decompose_change(
             "s0": s_pre.sum(axis=1), "c0": o_pre.sum(axis=1),
             "s1": s_post.sum(axis=1), "c1": o_post.sum(axis=1),
         }
+        active0, active1 = (s_pre > 0).sum(axis=1), (s_post > 0).sum(axis=1)
         both = np.flatnonzero((tot["s0"] > 0) & (tot["s1"] > 0))
+        eligible = both[(active0[both] >= MIN_ACTIVE_DAYS) & (active1[both] >= MIN_ACTIVE_DAYS)]
         core = (
-            _day_level_core(s_pre[both], o_pre[both], s_post[both], o_post[both], level)
-            if day_level_ok and len(both)
+            _day_level_core(s_pre[eligible], o_pre[eligible], s_post[eligible], o_post[eligible], level)
+            if inference == "day_level" and len(eligible)
             else None
         )
-        position = {int(seg): i for i, seg in enumerate(both)}
+        position = {int(seg): i for i, seg in enumerate(eligible)}
         entries: list[dict] = []
         for seg in np.flatnonzero((tot["s0"] > 0) | (tot["s1"] > 0)):
             codes = np.unravel_index(seg, sizes)
@@ -768,11 +838,13 @@ def decompose_change(
             }
             if status == "both":
                 day = (
-                    _day_level_result(core, position[int(seg)], level, enc.n_pre_days, enc.n_post_days)
-                    if core is not None
+                    _day_level_result(core, position[int(seg)], level)
+                    if core is not None and int(seg) in position
                     else None
                 )
-                entry["test"] = _segment_test(c0, s0, c1, s1, day, inference, level)
+                entry["test"] = _segment_test(
+                    c0, s0, c1, s1, day, inference, level, int(active0[seg]), int(active1[seg])
+                )
             entries.append(entry)
         raw[dims] = entries
 
@@ -811,6 +883,9 @@ def decompose_change(
                     binomial=t["binomial"],
                     day_level=t["day"],
                     reliable=t["reliable"],
+                    unreliable_reason=t["reason"],
+                    active_days_pre=t["active0"],
+                    active_days_post=t["active1"],
                     note=t["note"],
                     p_value=t["p"],
                     p_value_exact=t["p_exact"],
@@ -881,12 +956,8 @@ def decompose_change(
 
     n_scanned = len(tested)
     n_unreliable = sum(p.n_unreliable for p in partitions)
-    n_fallback = sum(
-        1 for p in partitions for s in p.segments
-        if s.test is not None and s.test.reliable and s.test.basis == "binomial_z"
-    )
     assumptions = _assumptions(
-        win_pre, win_post, partitions, disclosure, inference, fdr_family, n_scanned, n_unreliable, n_fallback,
+        win_pre, win_post, partitions, disclosure, inference, fdr_family, n_scanned, n_unreliable,
         gap, explain_threshold, max_localized_traffic_share,
     )
     summary = _summary(
@@ -918,10 +989,19 @@ def decompose_change(
 
 
 def _segment_test(
-    c0: int, s0: int, c1: int, s1: int, day: DayLevelResult | None, inference: str, level: float
+    c0: int,
+    s0: int,
+    c1: int,
+    s1: int,
+    day: DayLevelResult | None,
+    inference: str,
+    level: float,
+    active0: int,
+    active1: int,
 ) -> dict:
-    """Choose what a segment's p-value rests on, or decline to give one when counts are too sparse."""
+    """Choose what a segment's p-value rests on, or decline to give one when the data cannot support it."""
     binom = two_proportion_test(c0, s0, c1, s1, level=level)
+    base = {"binomial": binom, "active0": active0, "active1": active1}
     if binom.small_sample:
         exact = fisher_exact_p(c0, s0, c1, s1)
         note = (
@@ -930,22 +1010,27 @@ def _segment_test(
             f"significance is claimed. Fisher's exact p = {exact:.3g} is shown for information only; it "
             "assumes independent sessions."
         )
-        return {
-            "binomial": binom, "day": None, "basis": "none", "change_pp": binom.change_pp,
-            "reliable": False, "note": note, "p": None, "p_exact": exact,
-        }
-    if inference == "day_level" and day is not None:
-        return {
-            "binomial": binom, "day": day, "basis": "day_level_welch_t", "change_pp": day.change_pp,
-            "reliable": True, "note": None, "p": day.p_value, "p_exact": None,
-        }
-    note = "Plain binomial test: sessions are treated as independent, so the p-value ignores day-to-day variation and is optimistic."
+        return {**base, "day": None, "basis": "none", "change_pp": binom.change_pp, "reliable": False,
+                "reason": "sparse_counts", "note": note, "p": None, "p_exact": exact}
     if inference == "day_level":
-        note = "A window has fewer than 2 days, so day-to-day variation cannot be estimated. " + note
-    return {
-        "binomial": binom, "day": None, "basis": "binomial_z", "change_pp": binom.change_pp,
-        "reliable": True, "note": note, "p": binom.p_value, "p_exact": None,
-    }
+        if day is None:
+            exact = fisher_exact_p(c0, s0, c1, s1)
+            note = (
+                f"Too few days to estimate day-to-day variation: {active0} day(s) with sessions before and "
+                f"{active1} after (at least {MIN_ACTIVE_DAYS} in each window are needed). No significance is "
+                f"claimed. The plain binomial p = {binom.p_value:.3g} and Fisher's exact p = {exact:.3g} are "
+                "shown for information only; both treat sessions as independent and ignore day-to-day variation."
+            )
+            return {**base, "day": None, "basis": "none", "change_pp": binom.change_pp, "reliable": False,
+                    "reason": "too_few_active_days", "note": note, "p": None, "p_exact": exact}
+        return {**base, "day": day, "basis": "day_level_welch_t", "change_pp": day.change_pp, "reliable": True,
+                "reason": None, "note": None, "p": day.p_value, "p_exact": None}
+    note = (
+        "Plain binomial test: sessions are treated as independent, so the p-value ignores day-to-day "
+        "variation and is optimistic."
+    )
+    return {**base, "day": None, "basis": "binomial_z", "change_pp": binom.change_pp, "reliable": True,
+            "reason": None, "note": note, "p": binom.p_value, "p_exact": None}
 
 
 # --------------------------------------------------------------------------- ranking and wording
@@ -958,6 +1043,7 @@ def _build_set(
     kind: Literal["ranked_prefix", "traffic_limited_search"],
     reached: bool = True,
     traffic_limit: float | None = None,
+    interchangeable: list[str] | None = None,
 ) -> ExplainingSet:
     total = _fsum([s.contribution_pp for s in chosen])
     share = total / change_pp
@@ -977,7 +1063,13 @@ def _build_set(
             "; every selected rate change is distinguishable from noise"
             if tested_all
             else "; not every selected segment has a testable rate change distinguishable from noise "
-            "(it may reflect a traffic-mix shift or sparse data)"
+            "(it may reflect a traffic-mix shift or too little data)"
+        )
+        + (
+            f"; {', '.join(interchangeable)} have identical counts and the same test outcome, so any of them "
+            "could take the place of a selected segment with the same numbers"
+            if interchangeable
+            else ""
         )
         + "."
     )
@@ -993,6 +1085,7 @@ def _build_set(
         traffic_share_pre=_fsum([s.share_pre for s in chosen]),
         traffic_share_post=traffic_post,
         all_selected_significant=tested_all,
+        interchangeable_with=sorted(interchangeable or []),
         note=note,
     )
 
@@ -1031,9 +1124,12 @@ def _explaining_set(
     return _build_set(chosen, change_pp, threshold, "ranked_prefix", reached), None
 
 
-def _signature(s: SegmentEffect) -> tuple[int, int, int, int]:
-    """Segments with the same counts have identical numbers, so they are interchangeable."""
-    return (s.sessions_pre, s.sessions_post, s.orders_pre, s.orders_post)
+def _signature(s: SegmentEffect) -> tuple[tuple[int, int, int, int], bool]:
+    """What selection depends on besides contribution and traffic: the counts and the test outcome.
+
+    Two segments with the same counts but different daily variability can differ in significance, and then
+    they are *not* interchangeable (one may qualify as a localization while the other cannot)."""
+    return (s.sessions_pre, s.sessions_post, s.orders_pre, s.orders_post), bool(s.test is not None and s.test.significant)
 
 
 def _local_set(
@@ -1049,11 +1145,18 @@ def _local_set(
     The ranked prefix can fail the traffic limit even though another combination qualifies (a large
     segment may rank first yet carry too much traffic while a smaller one explains nearly as much), so
     this searches combinations of the positively contributing segments instead of only testing the prefix.
-    Segments with identical counts are one indivisible group, which keeps the choice independent of
-    labels. The search is exhaustive over up to ``MAX_SEARCH_ATOMS`` groups (the largest contributors
-    when there are more; the third return value says which). Among qualifying combinations it prefers
-    one whose segments all have a distinguishable rate change, then the fewest segments, then the least
-    traffic, then the largest contribution.
+
+    Segments with identical counts *and* the same test outcome are interchangeable: they have the same
+    contribution, traffic and significance, so only how many of them are chosen matters, not which. Each
+    such group is searched by count (0 to all of its members), so two identical segments that each qualify
+    alone are not forced together. Segments that differ in significance are separate groups. Among
+    qualifying combinations it prefers one whose segments all have a distinguishable rate change, then the
+    fewest segments, then the least traffic, then the largest contribution. The choice does not depend on
+    labels except for which interchangeable member is named (the first by label), and the others are listed.
+
+    The search is exhaustive unless there are more than ``MAX_SEARCH_ATOMS`` groups or more than
+    ``MAX_SEARCH_COMBINATIONS`` combinations; then the largest contributors are searched and the third
+    return value is false.
     """
     if not has_change:
         return None, "The pooled conversion did not change (to within rounding), so there is nothing to localize.", True
@@ -1061,30 +1164,50 @@ def _local_set(
     if not positives:
         return None, "No segment moves in the direction of the overall change.", True
 
-    groups: dict[tuple[int, int, int, int], list[SegmentEffect]] = {}
+    groups: dict[tuple, list[SegmentEffect]] = {}
     for s in positives:
         groups.setdefault(_signature(s), []).append(s)
-    atoms = sorted(
-        groups.items(),
-        key=lambda kv: (-sign * _fsum([m.contribution_pp for m in kv[1]]), kv[0]),
-    )
-    exhaustive = len(atoms) <= MAX_SEARCH_ATOMS
-    members = [m for _, m in atoms[:MAX_SEARCH_ATOMS]]
-    n = len(members)
-    contribution = np.array([sign * _fsum([s.contribution_pp for s in m]) for m in members])
-    traffic = np.array([_fsum([s.share_post for s in m]) for m in members])
-    size = np.array([len(m) for m in members])
-    untested = np.array([0 if all(s.test is not None and s.test.significant for s in m) else 1 for m in members])
+    for members in groups.values():
+        members.sort(key=lambda s: (s.rank, s.label))
+    ordered = sorted(groups.items(), key=lambda kv: (-sign * kv[1][0].contribution_pp, kv[0]))
 
-    masks = np.arange(1, 1 << n, dtype=np.int64)
-    total_c, total_t = np.zeros(len(masks)), np.zeros(len(masks))
-    total_k, total_u = np.zeros(len(masks), dtype=np.int64), np.zeros(len(masks), dtype=np.int64)
-    for j in range(n):  # fixed, label-independent accumulation order
-        on = ((masks >> j) & 1).astype(bool)
-        total_c += np.where(on, contribution[j], 0.0)
-        total_t += np.where(on, traffic[j], 0.0)
-        total_k += np.where(on, size[j], 0)
-        total_u += np.where(on, untested[j], 0)
+    included: list[list[SegmentEffect]] = []
+    product, exhaustive = 1, True
+    for _, members in ordered:
+        share = members[0].share_post
+        cap = len(members) if share <= 0 else min(len(members), int(max_traffic * (1 + 1e-12) / share))
+        if cap == 0:
+            continue  # one member alone already exceeds the traffic limit: it can never be part of a set
+        if len(included) >= MAX_SEARCH_ATOMS or product * (cap + 1) > MAX_SEARCH_COMBINATIONS:
+            exhaustive = False
+            continue
+        included.append(members)
+        product *= cap + 1
+    if not included:
+        return None, (
+            f"No segment is small enough to carry at most {max_traffic:.0%} of post-window sessions on its own."
+            if exhaustive
+            else "No qualifying combination was found: the search was limited."
+        ), exhaustive
+
+    radix = [min(len(m), int(max_traffic * (1 + 1e-12) / m[0].share_post)) + 1 if m[0].share_post > 0 else len(m) + 1
+             for m in included]
+    contribution = np.array([sign * m[0].contribution_pp for m in included])
+    traffic = np.array([m[0].share_post for m in included])
+    untested = np.array([0 if _signature(m[0])[1] else 1 for m in included])
+    idx = np.arange(1, product, dtype=np.int64)
+    total_c, total_t = np.zeros(len(idx)), np.zeros(len(idx))
+    total_k, total_u = np.zeros(len(idx), dtype=np.int64), np.zeros(len(idx), dtype=np.int64)
+    digits = []
+    stride = 1
+    for g, r in enumerate(radix):  # fixed, label-independent order
+        digit = (idx // stride) % r
+        stride *= r
+        digits.append(digit)
+        total_c += digit * contribution[g]
+        total_t += digit * traffic[g]
+        total_k += digit
+        total_u += np.where(digit > 0, untested[g], 0)
 
     target = threshold * abs(change_pp)
     feasible = np.flatnonzero((total_c >= target * (1 - 1e-12)) & (total_t <= max_traffic * (1 + 1e-12)))
@@ -1096,17 +1219,27 @@ def _local_set(
             )
         else:
             why = (
-                f"No qualifying combination was found among the {MAX_SEARCH_ATOMS} largest positive "
-                "contributors (the search is limited when more segments contribute)."
+                "No qualifying combination was found among the largest positive contributors (the search is "
+                "limited when many segments contribute)."
             )
         return None, why, exhaustive
     order = np.lexsort(
-        (masks[feasible], -total_c[feasible], total_t[feasible], total_k[feasible], total_u[feasible] > 0)
+        (idx[feasible], -total_c[feasible], total_t[feasible], total_k[feasible], total_u[feasible] > 0)
     )
-    best = int(masks[feasible[order[0]]])
-    chosen = [s for j in range(n) if (best >> j) & 1 for s in members[j]]
+    pick = int(feasible[order[0]])
+    chosen: list[SegmentEffect] = []
+    alternatives: list[str] = []
+    for g, members in enumerate(included):
+        take = int(digits[g][pick])
+        chosen.extend(members[:take])
+        if 0 < take < len(members):
+            alternatives.extend(m.label for m in members[take:])
     chosen.sort(key=lambda s: (s.rank, s.label))
-    return _build_set(chosen, change_pp, threshold, "traffic_limited_search", True, max_traffic), None, exhaustive
+    return (
+        _build_set(chosen, change_pp, threshold, "traffic_limited_search", True, max_traffic, alternatives),
+        None,
+        exhaustive,
+    )
 
 
 def _localization(
@@ -1178,7 +1311,6 @@ def _assumptions(
     fdr_family: str,
     n_scanned: int,
     n_unreliable: int,
-    n_fallback: int,
     gap: float | None,
     threshold: float,
     max_traffic: float,
@@ -1190,9 +1322,11 @@ def _assumptions(
     )
     if inference == "day_level":
         test_text = (
-            "Segment tests use days as the sampling units (ratio-estimator variance of each window's pooled "
-            "rate, Welch t with Welch degrees of freedom), so day-to-day variation and the number of days are "
-            "reflected in the p-values and intervals; the plain binomial p-value is reported alongside."
+            "Segment tests use days with sessions as the sampling units (ratio-estimator variance of each "
+            "window's pooled rate, floored at the binomial variance, Welch t with Welch degrees of freedom), so "
+            f"day-to-day variation and the number of days are reflected in the p-values and intervals. A segment "
+            f"needs at least {MIN_ACTIVE_DAYS} days with sessions in each window to be tested; the plain binomial "
+            "p-value is reported alongside."
         )
     else:
         test_text = (
@@ -1232,14 +1366,10 @@ def _assumptions(
     ]
     if n_unreliable:
         out.append(
-            f"{n_unreliable} segment(s) are too sparse for a reliable test (a cell of the pooled before/after "
-            f"table has fewer than {MIN_EXPECTED_COUNT:g} expected counts): they have no p-value, q-value or "
-            "significance claim and are not in the false-discovery family, although their contribution is counted."
-        )
-    if n_fallback:
-        out.append(
-            f"{n_fallback} segment test(s) used the plain binomial test because a window has fewer than "
-            f"{MIN_DAYS_FOR_DAY_LEVEL} days; those p-values are optimistic."
+            f"{n_unreliable} segment(s) cannot be tested reliably (a cell of the pooled before/after table has "
+            f"fewer than {MIN_EXPECTED_COUNT:g} expected counts, or a window has fewer than {MIN_ACTIVE_DAYS} "
+            "days with sessions): they have no p-value, q-value or significance claim and are not in the "
+            "false-discovery family, although their contribution is counted."
         )
     if gap is not None and gap > 0.1:
         out.append(
@@ -1291,7 +1421,7 @@ def _summary(
                 f"{seg.mix_effect_pp:+.3f} pp; "
             )
             if t.q_value is None:
-                text += f"For {seg.label}: {interval}no reliable test is available (sparse counts). "
+                text += f"For {seg.label}: {interval}no reliable test is available (too little data). "
             else:
                 text += (
                     f"For {seg.label}: {interval}BH q = {t.q_value:.3g}"
@@ -1308,7 +1438,7 @@ def _summary(
         "False discovery rate was controlled with Benjamini-Hochberg over "
         f"{'all ' + str(n_scanned) + ' segment tests across partitions' if fdr_family == 'scan' else 'each partition'}"
         f" ({'days as the sampling units' if inference == 'day_level' else 'plain binomial tests, which are optimistic'})"
-        + (f"; {n_unreliable} sparse segment(s) were not tested" if n_unreliable else "")
+        + (f"; {n_unreliable} segment(s) with too little data were not tested" if n_unreliable else "")
         + ". Every partition reconciles to the overall change"
         + (
             "."

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from frames import day, segmented, to_frame
+from frames import DEFAULT_SEGMENT, day, segmented, to_frame
 from statsmodels.stats.multitest import multipletests
 
 from causelens.analytics import (
@@ -425,15 +425,24 @@ def test_inference_binomial_uses_the_plain_test_and_says_it_is_optimistic(refere
     assert r.change_pp == ref.change_pp  # accounting does not depend on the test
 
 
-def test_one_day_windows_fall_back_to_the_plain_test_and_say_so():
+def test_windows_with_too_few_days_withhold_every_day_level_test_and_say_so():
     df = segmented([
         {"device": "desktop", "sessions": (1000, 1000), "rate": (0.04, 0.03)},
         {"device": "mobile", "sessions": (1000, 1000), "rate": (0.02, 0.02)},
     ], n_days=2, split=1)
     r = decompose_change(df, (day(0), day(0)), (day(1), day(1)), min_days_per_window=1)
-    t = seg(r, "device", "device=desktop").test
-    assert t.basis == "binomial_z" and t.reliable and "fewer than 2 days" in t.note
-    assert any("fewer than 2 days" in a for a in r.assumptions)
+    for s_ in part(r, "device").segments:
+        t = s_.test
+        assert not t.reliable and t.unreliable_reason == "too_few_active_days" and t.basis == "none"
+        assert t.p_value is None and t.q_value is None and t.significant is False
+        assert "Too few days" in t.note and (t.active_days_pre, t.active_days_post) == (1, 1)
+    assert r.n_tests_scanned == 0 and r.n_unreliable_tests > 0
+    assert any("fewer than 3 days with sessions" in a for a in r.assumptions)
+    assert part(r, "device").reconciles  # the accounting does not need a test
+    # asking for the plain test is an explicit, labelled choice
+    plain = decompose_change(df, (day(0), day(0)), (day(1), day(1)), min_days_per_window=1, inference="binomial")
+    t = seg(plain, "device", "device=desktop").test
+    assert t.reliable and t.basis == "binomial_z" and "optimistic" in t.note
 
 
 # ------------------------------------------------------------------ exclusions and windows are disclosed
@@ -706,7 +715,8 @@ def test_sparse_segments_are_left_out_of_the_fdr_family_but_still_counted_in_the
     expected = multipletests([s.test.p_value for s in reliable], method="fdr_bh")[1]
     assert np.allclose([s.test.q_value_scan for s in reliable], expected)
     assert p.reconciles and seg(r, "device", "device=mobile").contribution_pp != 0  # its movement is still accounted for
-    assert any("too sparse" in a for a in r.assumptions) and "sparse segment(s) were not tested" in r.summary
+    assert any("cannot be tested reliably" in a for a in r.assumptions)
+    assert "segment(s) with too little data were not tested" in r.summary
     assert p.rate_effect_significant_pp == pytest.approx(
         sum(s.rate_effect_pp for s in p.segments if s.test is not None and s.test.significant)
     )
@@ -744,3 +754,179 @@ def test_the_reliability_rule_follows_the_smallest_expected_cell(pre, post):
 
 def test_reference_data_has_no_unreliable_segments(ref):
     assert ref.n_unreliable_tests == 0 and all(p.n_unreliable == 0 for p in ref.partitions)
+
+
+# ------------------------------------------------------------------ PR #4 review round 2
+# Finding 1: zero-padded days must not manufacture certainty.
+
+
+def _one_active_day_per_window_frame():
+    """Mobile: 100 sessions / 10 orders on one day before, 100 / 11 on one day after; desktop is large and steady."""
+    desktop = segmented([{"device": "desktop", "sessions": (1000, 1000), "rate": (0.03, 0.03)}])
+    template = desktop.iloc[0].to_dict()
+    rows = [{**template, "device": "mobile", "date": day(0).isoformat(), "sessions": 100, "orders": 10},
+            {**template, "device": "mobile", "date": day(14).isoformat(), "sessions": 100, "orders": 11}]
+    return pd.concat([desktop, pd.DataFrame(rows)], ignore_index=True)
+
+
+def test_a_segment_seen_on_one_day_per_window_is_withheld_not_given_p_zero():
+    """It used to be reported with 14 days per window, p = q = 0 and the interval [1.0, 1.0]."""
+    from scipy import stats as sp
+
+    r = decompose_change(_one_active_day_per_window_frame(), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False)
+    m = seg(r, "device", "device=mobile")
+    t = m.test
+    assert (m.sessions_pre, m.orders_pre, m.sessions_post, m.orders_post) == (100, 10, 100, 11)
+    assert not t.reliable and t.unreliable_reason == "too_few_active_days" and t.basis == "none"
+    assert (t.active_days_pre, t.active_days_post) == (1, 1) and t.day_level is None
+    assert t.p_value is None and t.q_value is None and t.q_value_scan is None and t.significant is False
+    assert t.p_value_exact == pytest.approx(sp.fisher_exact([[10, 90], [11, 89]]).pvalue)
+    assert t.binomial.p_value == pytest.approx(0.818, abs=1e-3)  # shown for information only
+    assert "Too few days" in t.note and "at least 3 in each window" in t.note and "information only" in t.note
+    assert t.change_pp.lower < t.change_pp.estimate < t.change_pp.upper  # never a zero-width interval
+    assert r.n_unreliable_tests == 1 and part(r, "device").n_unreliable == 1 and part(r, "device").reconciles
+
+
+def test_the_withheld_segment_is_left_out_of_the_fdr_family():
+    r = decompose_change(_one_active_day_per_window_frame(), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False)
+    reliable = [s for p in r.partitions for s in p.segments if s.test is not None and s.test.reliable]
+    assert [s.label for s in reliable] == ["device=desktop"] and r.n_tests_scanned == 1
+    assert seg(r, "device", "device=desktop").test.q_value == pytest.approx(
+        multipletests([seg(r, "device", "device=desktop").test.p_value], method="fdr_bh")[1][0]
+    )
+
+
+@pytest.mark.parametrize(("active", "reliable"), [(1, False), (2, False), (3, True), (5, True)])
+def test_a_segment_needs_three_days_with_sessions_in_each_window(active, reliable):
+    desktop = segmented([{"device": "desktop", "sessions": (1000, 1000), "rate": (0.03, 0.03)}])
+    template = desktop.iloc[0].to_dict()
+    rows = []
+    for i in range(active):
+        rows.append({**template, "device": "mobile", "date": day(i).isoformat(), "sessions": 100, "orders": [8, 10, 12, 9, 11][i]})
+        rows.append({**template, "device": "mobile", "date": day(14 + i).isoformat(), "sessions": 100, "orders": [4, 6, 5, 7, 3][i]})
+    r = decompose_change(pd.concat([desktop, pd.DataFrame(rows)], ignore_index=True), W_PRE, W_POST,
+                         dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    t = seg(r, "device", "device=mobile").test
+    assert t.reliable is reliable and (t.active_days_pre, t.active_days_post) == (active, active)
+    if reliable:
+        # the sampling units are the days that had sessions, not the 14 days of the window
+        assert (t.day_level.n_days_pre, t.day_level.n_days_post) == (active, active)
+        assert t.change_pp.lower < t.change_pp.upper and 0 < t.p_value <= 1 and t.q_value is not None
+    else:
+        assert t.p_value is None and t.q_value is None and not t.significant
+
+
+def test_padding_a_segments_absent_days_with_zero_rows_does_not_change_its_test():
+    desktop = segmented([{"device": "desktop", "sessions": (1000, 1000), "rate": (0.03, 0.03)}])
+    template = desktop.iloc[0].to_dict()
+    active = [{**template, "device": "mobile", "date": day(i).isoformat(), "sessions": 100, "orders": o}
+              for i, o in [(0, 8), (1, 10), (2, 12), (14, 4), (15, 6), (16, 5)]]
+    zeros = [{**template, "device": "mobile", "date": day(i).isoformat(), "sessions": 0, "orders": 0}
+             for i in [3, 4, 5, 6, 7, 17, 18, 19, 20]]
+    kwargs = {"dimensions": ["device"], "include_pairs": False, "apply_exclusions": False}
+    a = decompose_change(pd.concat([desktop, pd.DataFrame(active)], ignore_index=True), W_PRE, W_POST, **kwargs)
+    b = decompose_change(pd.concat([desktop, pd.DataFrame(active + zeros)], ignore_index=True), W_PRE, W_POST, **kwargs)
+    assert seg(a, "device", "device=mobile").test.model_dump() == seg(b, "device", "device=mobile").test.model_dump()
+
+
+def test_plain_inference_remains_an_explicit_labelled_choice_for_few_day_segments():
+    r = decompose_change(_one_active_day_per_window_frame(), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False, inference="binomial")
+    t = seg(r, "device", "device=mobile").test
+    assert t.reliable and t.basis == "binomial_z" and "optimistic" in t.note and t.p_value == t.binomial.p_value
+
+
+def test_constant_daily_rates_no_longer_produce_zero_variance():
+    """Identical daily rates used to give a variance of exactly zero, p = 0 and a zero-width interval."""
+    df = segmented([
+        {"device": "desktop", "sessions": (1000, 1000), "rate": (0.04, 0.03)},
+        {"device": "mobile", "sessions": (1000, 1000), "rate": (0.02, 0.02)},
+    ])
+    r = decompose_change(df, W_PRE, W_POST, dimensions=["device"], include_pairs=False)
+    for s_ in part(r, "device").segments:
+        t = s_.test
+        assert t.day_level.std_error_pp > 0 and t.change_pp.lower < t.change_pp.upper
+        assert t.day_level.variance_floored_pre and t.day_level.variance_floored_post
+    desktop = seg(r, "device", "device=desktop").test
+    assert 0 < desktop.p_value < 1e-3 and desktop.significant
+    assert seg(r, "device", "device=mobile").test.p_value == pytest.approx(1.0)
+
+
+# Finding 2: grouping must respect selection-relevant statistical evidence.
+
+
+def _equal_counts_unequal_evidence(desktop_noisy: bool = True):
+    """Mobile and desktop have identical pooled counts (98/2380 before, 49/2380 after), but mobile's days are
+    smooth and desktop's are wildly variable. Tablet moves the other way so each of them alone accounts for 87%
+    of the change; together they carry 77% of post-window sessions, over the 50% limit."""
+    rows = []
+    for d in range(28):
+        post = d >= 14
+        mobile = (3 if d % 2 == 0 else 4) if post else 7
+        if desktop_noisy:
+            desktop = (0 if d % 2 == 0 else 7) if post else (0 if d % 2 == 0 else 14)
+        else:
+            desktop = mobile
+        for device, orders, sessions in (("mobile", mobile, 170), ("desktop", desktop, 170),
+                                         ("tablet", 8 if post else 5, 100)):
+            rows.append({**DEFAULT_SEGMENT, "device": device, "date": day(d).isoformat(), "sessions": sessions, "orders": orders})
+    return pd.DataFrame(rows)
+
+
+def test_equal_counts_with_different_significance_are_not_forced_into_one_group():
+    """Grouping on counts alone made a 77%-of-traffic atom, rejected both, and called the change broad."""
+    r = decompose_change(_equal_counts_unequal_evidence(), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False)
+    p = part(r, "device")
+    mobile, desktop = seg(r, "device", "device=mobile"), seg(r, "device", "device=desktop")
+    same = ("sessions_pre", "sessions_post", "orders_pre", "orders_post", "contribution_pp", "share_post")
+    assert all(getattr(mobile, f) == getattr(desktop, f) for f in same)  # identical in everything but the days
+    assert mobile.test.significant and not desktop.test.significant  # same counts, different daily evidence
+    assert mobile.share_post == pytest.approx(0.386, abs=1e-3)
+    # The ranked prefix takes tied contributions together, so it holds both and carries 77% of traffic: over the
+    # limit. That is the situation that used to be reported as a broad shift.
+    assert sorted(p.explaining_set.segments) == ["device=desktop", "device=mobile"]
+    assert p.explaining_set.traffic_share_post == pytest.approx(2 * mobile.share_post)
+    assert p.explaining_set.traffic_share_post > 0.5
+    assert p.local_set is not None and p.local_set.segments == ["device=mobile"]
+    assert p.local_set.all_selected_significant and p.local_set.interchangeable_with == []
+    assert p.local_set.traffic_share_post == pytest.approx(mobile.share_post)
+    assert r.localization is not None and r.localization.segments == ["device=mobile"]
+    assert r.localization_note is None and "broad shift" not in r.summary
+
+
+def test_the_unreliable_twin_cannot_replace_the_significant_one_or_the_other_way_round():
+    df = _equal_counts_unequal_evidence()
+    swapped = df.assign(device=df["device"].replace({"mobile": "desktop", "desktop": "mobile"}))
+    r = decompose_change(swapped, W_PRE, W_POST, dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    assert r.localization.segments == ["device=desktop"]  # the smooth one, now named desktop
+    assert seg(r, "device", "device=desktop").test.significant and not seg(r, "device", "device=mobile").test.significant
+
+
+def test_identical_qualifying_segments_are_not_forced_together():
+    """Same counts and same outcome: each qualifies alone on 39% of traffic; both together would be 77%."""
+    r = decompose_change(_equal_counts_unequal_evidence(desktop_noisy=False), W_PRE, W_POST, dimensions=["device"],
+                         include_pairs=False, apply_exclusions=False)
+    p = part(r, "device")
+    assert seg(r, "device", "device=mobile").test.significant and seg(r, "device", "device=desktop").test.significant
+    ls = p.local_set
+    assert ls.k == 1 and ls.traffic_share_post == pytest.approx(0.386, abs=1e-3)
+    assert ls.segments == ["device=desktop"] and ls.interchangeable_with == ["device=mobile"]  # first by label
+    assert "interchangeable" in ls.note or "could take the place" in ls.note
+    assert r.localization is not None and r.localization.segments == ["device=desktop"]
+    # the ranked prefix takes tied segments together (it has no traffic limit), which is why it differs
+    assert sorted(p.explaining_set.segments) == ["device=desktop", "device=mobile"]
+    assert p.explaining_set.traffic_share_post > 0.5 > ls.traffic_share_post
+
+
+def test_localization_numbers_do_not_depend_on_which_interchangeable_segment_is_named():
+    df = _equal_counts_unequal_evidence(desktop_noisy=False)
+    a = decompose_change(df, W_PRE, W_POST, dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    renamed = df.assign(device=df["device"].replace({"desktop": "zzz", "mobile": "aaa", "tablet": "mmm"}))
+    b = decompose_change(renamed, W_PRE, W_POST, dimensions=["device"], include_pairs=False, apply_exclusions=False)
+    for x, y in ((a.partitions[0].local_set, b.partitions[0].local_set),):
+        assert (x.k, x.traffic_share_post, x.selected_share_of_change, x.rate_effect_pp, x.mix_effect_pp) == (
+            y.k, y.traffic_share_post, y.selected_share_of_change, y.rate_effect_pp, y.mix_effect_pp)
+    assert b.localization.segments == ["device=aaa"] and b.partitions[0].local_set.interchangeable_with == ["device=zzz"]

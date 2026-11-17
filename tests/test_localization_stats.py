@@ -171,35 +171,101 @@ def test_newcombe_interval_covers_the_true_difference_at_about_its_level():
 # ------------------------------------------------------------------ day-level test
 
 
-def test_day_level_matches_an_independent_hand_computation():
+def _floor(orders: float, sessions: float) -> float:
+    """Binomial variance floor of a pooled rate, from the rate shrunk by half an observation."""
+    shrunk = (orders + 0.5) / (sessions + 1)
+    return shrunk * (1 - shrunk) / sessions
+
+
+def _independent_day_level(s0, o0, s1, o1, level=0.95):
+    """The day-level test recomputed with plain Python/numpy, written from the documented formulas."""
     from scipy import stats
 
-    s0, o0 = np.array([100.0, 120, 90, 110]), np.array([3.0, 5, 2, 4])
-    s1, o1 = np.array([105.0, 95, 130]), np.array([6.0, 5, 9])
-    r = day_level_test(s0, o0, s1, o1)
-    r0, r1 = o0.sum() / s0.sum(), o1.sum() / s1.sum()
-    v0 = 4 / 3 * np.sum((o0 - r0 * s0) ** 2) / s0.sum() ** 2
-    v1 = 3 / 2 * np.sum((o1 - r1 * s1) ** 2) / s1.sum() ** 2
+    out = {}
+    variances, extra = [], []
+    for name, s, o in (("pre", s0, o0), ("post", s1, o1)):
+        s, o = np.asarray(s, float), np.asarray(o, float)
+        active = s > 0
+        d = int(active.sum())
+        rate = o.sum() / s.sum()
+        raw = d / (d - 1) * np.sum((o[active] - rate * s[active]) ** 2) / s.sum() ** 2
+        floor = _floor(o.sum(), s.sum())
+        variances.append(max(raw, floor))
+        extra.append(np.inf if raw < floor else d - 1)
+        out[name] = (d, rate, raw, floor)
+    v0, v1 = variances
+    diff = out["post"][1] - out["pre"][1]
     se = np.sqrt(v0 + v1)
-    df = (v0 + v1) ** 2 / (v0**2 / 3 + v1**2 / 2)
-    t = (r1 - r0) / se
-    crit = stats.t.ppf(0.975, df)
-    assert r.t_statistic == pytest.approx(t) and r.degrees_of_freedom == pytest.approx(df)
-    assert r.p_value == pytest.approx(2 * stats.t.sf(abs(t), df))
-    assert r.change_pp.estimate == pytest.approx(100 * (r1 - r0))
-    assert r.change_pp.lower == pytest.approx(100 * (r1 - r0 - crit * se))
-    assert r.change_pp.upper == pytest.approx(100 * (r1 - r0 + crit * se))
-    assert r.std_error_pp == pytest.approx(100 * se) and (r.n_days_pre, r.n_days_post) == (4, 3)
-    assert r.design_effect_pre == pytest.approx(v0 / (r0 * (1 - r0) / s0.sum()))
+    df = min((v0 + v1) ** 2 / (v0**2 / extra[0] + v1**2 / extra[1]), 1e6)
+    t = diff / se
+    crit = stats.t.ppf(1 - (1 - level) / 2, df)
+    return {"t": t, "df": df, "p": 2 * stats.t.sf(abs(t), df), "diff": diff, "se": se,
+            "lower": diff - crit * se, "upper": diff + crit * se, "parts": out}
 
 
-def test_day_level_with_identical_daily_rates_is_flat_not_nan():
+def test_day_level_matches_an_independent_hand_computation_in_both_variance_regimes():
+    """Before window: smooth days, so the binomial floor binds. After window: noisy days, so the estimate binds."""
+    s0, o0 = [1000.0] * 4, [30.0, 31, 29, 30]
+    s1, o1 = [1000.0] * 3, [10.0, 60, 30]
+    r = day_level_test(s0, o0, s1, o1)
+    ref = _independent_day_level(s0, o0, s1, o1)
+    assert r.variance_floored_pre and not r.variance_floored_post  # both regimes are exercised
+    assert r.t_statistic == pytest.approx(ref["t"]) and r.degrees_of_freedom == pytest.approx(ref["df"])
+    assert r.p_value == pytest.approx(ref["p"])
+    assert r.change_pp.estimate == pytest.approx(100 * ref["diff"])
+    assert r.change_pp.lower == pytest.approx(100 * ref["lower"]) and r.change_pp.upper == pytest.approx(100 * ref["upper"])
+    assert r.std_error_pp == pytest.approx(100 * ref["se"]) and (r.n_days_pre, r.n_days_post) == (4, 3)
+    raw, floor = ref["parts"]["pre"][2:]
+    assert r.design_effect_pre == pytest.approx(raw / floor) and r.design_effect_pre < 1  # smoother than binomial
+
+
+def test_day_level_matches_the_independent_computation_on_noisy_data_without_the_floor():
+    s0, o0 = [100.0, 120, 90, 110], [3.0, 12, 2, 9]
+    s1, o1 = [105.0, 95, 130], [15.0, 2, 20]
+    r = day_level_test(s0, o0, s1, o1)
+    ref = _independent_day_level(s0, o0, s1, o1)
+    assert not r.variance_floored_pre and not r.variance_floored_post
+    assert r.degrees_of_freedom == pytest.approx(ref["df"]) and r.p_value == pytest.approx(ref["p"])
+    assert r.degrees_of_freedom < 6  # estimated variances: Welch df below the pooled d-1 + d-1
+
+
+def test_day_level_is_never_degenerate():
+    """Identical daily rates, zero orders and all orders used to give zero variance, so p = 0 or a zero-width
+    interval; every window now carries at least binomial sampling uncertainty."""
     same = day_level_test([1000] * 5, [30] * 5, [2000] * 5, [60] * 5)
-    assert same.p_value == 1.0 and same.t_statistic is None and same.degrees_of_freedom is None
-    assert same.change_pp.lower == same.change_pp.upper == same.change_pp.estimate == 0.0
+    assert same.p_value == 1.0 and same.t_statistic == 0.0 and same.change_pp.estimate == 0.0
+    assert same.change_pp.lower < 0 < same.change_pp.upper
     moved = day_level_test([1000] * 5, [30] * 5, [1000] * 5, [20] * 5)
-    assert moved.p_value == 0.0 and moved.change_pp.estimate == pytest.approx(-1.0)
-    assert "nan" not in same.model_dump_json().lower()
+    assert 0.0 < moved.p_value < 0.01 and moved.change_pp.lower < moved.change_pp.estimate < moved.change_pp.upper
+    for orders in (0, 1000):
+        edge = day_level_test([1000] * 3, [orders] * 3, [1000] * 3, [orders] * 3)
+        assert edge.p_value == 1.0 and edge.change_pp.lower < 0 < edge.change_pp.upper
+        assert edge.std_error_pp > 0 and edge.degrees_of_freedom is not None
+    for r in (same, moved, edge):
+        text = r.model_dump_json().lower()
+        assert "nan" not in text and "infinity" not in text
+
+
+def test_zero_session_days_are_not_observations():
+    """A segment's absent days must neither add degrees of freedom nor change the result."""
+    s0, o0, s1, o1 = [100.0, 120, 90, 110], [3.0, 12, 2, 9], [105.0, 95, 130], [15.0, 2, 20]
+    plain = day_level_test(s0, o0, s1, o1)
+    padded = day_level_test([0, *s0, 0, 0], [0, *o0, 0, 0], [0, 0, *s1, 0], [0, 0, *o1, 0])
+    assert padded.model_dump() == plain.model_dump()
+    assert (padded.n_days_pre, padded.n_days_post) == (4, 3)
+
+
+def test_a_single_active_day_per_window_is_refused_not_given_certainty():
+    """100 sessions and 10 orders on one day before, 100 and 11 on one day after, padded to 14 days each:
+    it used to report 14 days per window, p = 0 and a zero-width interval."""
+    pad = [0.0] * 13
+    for one, two in [([100.0, *pad], [10.0, *pad]), ([*pad, 100.0], [*pad, 10.0])]:
+        with pytest.raises(ValueError, match="at least 3 days with sessions in each window"):
+            day_level_test(one, two, [100.0, *pad], [11.0, *pad])
+    with pytest.raises(ValueError, match="got 2 before and 3 after"):
+        day_level_test([100.0, 100.0, *pad], [10.0, 10.0, *pad], [100.0] * 3, [11.0] * 3)
+    ok = day_level_test([100.0] * 3, [10.0, 12, 8], [100.0] * 3, [11.0, 13, 9])  # exactly three days is enough
+    assert (ok.n_days_pre, ok.n_days_post) == (3, 3) and ok.change_pp.lower < ok.change_pp.upper
 
 
 def test_day_level_reflects_day_to_day_variation_and_the_number_of_days():
@@ -209,23 +275,85 @@ def test_day_level_reflects_day_to_day_variation_and_the_number_of_days():
     # the same noisy pattern over more days gives a narrower interval: few days cost width through the t distribution
     long = day_level_test([1000] * 24, [10, 50, 31, 12, 49, 28] * 4, [1000] * 24, [20, 52, 37, 24, 51, 32] * 4)
     assert (long.change_pp.upper - long.change_pp.lower) < (noisy.change_pp.upper - noisy.change_pp.lower)
-    two_days = day_level_test([1000] * 2, [20, 40], [1000] * 2, [30, 50])
-    assert two_days.degrees_of_freedom is not None and two_days.degrees_of_freedom < 3
+    three = day_level_test([1000] * 3, [20, 40, 10], [1000] * 3, [30, 50, 20])
+    assert three.degrees_of_freedom is not None and three.degrees_of_freedom < 6
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ([1000], [30], [1000, 1000], [30, 30]),  # one day before
-        ([1000, 1000], [30, 30], [0, 0], [0, 0]),  # no sessions after
-        ([1000, 1000], [30], [1000, 1000], [30, 30]),  # length mismatch
-        ([1000, 1000], [30, 2000], [1000, 1000], [30, 30]),  # orders above sessions
-        ([1000, 1000], [-1, 30], [1000, 1000], [30, 30]),
+        ([1000, 1000], [30, 30], [1000, 1000, 1000], [30, 30, 30]),  # two days before
+        ([1000, 1000, 1000], [30, 30, 30], [0, 0, 0], [0, 0, 0]),  # no sessions after
+        ([1000, 1000, 1000], [30, 30], [1000, 1000, 1000], [30, 30, 30]),  # length mismatch
+        ([1000, 1000, 1000], [30, 2000, 30], [1000, 1000, 1000], [30, 30, 30]),  # orders above sessions
+        ([1000, 1000, 1000], [-1, 30, 30], [1000, 1000, 1000], [30, 30, 30]),
+        ([-5, 1000, 1000], [0, 30, 30], [1000, 1000, 1000], [30, 30, 30]),  # negative sessions
+        ([[1000, 1000, 1000]], [[30, 30, 30]], [1000, 1000, 1000], [30, 30, 30]),  # two-dimensional
+        (["a", "b", "c"], [1, 2, 3], [1000, 1000, 1000], [30, 30, 30]),  # not numeric
     ],
 )
 def test_day_level_rejects_unusable_input(args):
     with pytest.raises(ValueError):
         day_level_test(*args)
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+@pytest.mark.parametrize("position", range(4))
+def test_day_level_rejects_nonfinite_values_before_calculating(bad, position):
+    """Previously NaN input returned NaN estimates and p-values, serialised as null."""
+    arrays = [[1000.0, 1000, 1000], [30.0, 30, 30], [1000.0, 1000, 1000], [30.0, 40, 35]]
+    arrays[position][1] = bad
+    with pytest.raises(ValueError, match="finite"):
+        day_level_test(*arrays)
+
+
+def test_day_level_example_from_review_is_rejected():
+    with pytest.raises(ValueError, match="finite"):
+        day_level_test([1000, np.nan], [30, 30], [1000, 1000], [30, 40])
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 2.5, "x", None])
+def test_counts_must_be_finite_whole_numbers(bad):
+    with pytest.raises(ValueError):
+        two_proportion_test(bad, 100, 5, 100)
+    with pytest.raises(ValueError):
+        two_proportion_test(5, bad, 5, 100)
+    with pytest.raises(ValueError):
+        fisher_exact_p(bad, 100, 5, 100)
+    with pytest.raises(ValueError):
+        fisher_exact_p(5, 100, 5, bad)
+
+
+def test_integral_floats_are_accepted_as_counts():
+    assert two_proportion_test(5.0, 100.0, 7.0, 100.0).count_post == 7
+    assert 0 <= fisher_exact_p(5.0, 100.0, 7.0, 100.0) <= 1
+
+
+@settings(max_examples=60, deadline=None, derandomize=True)
+@given(
+    seed=st.integers(0, 2**31 - 1),
+    d0=st.integers(3, 12),
+    d1=st.integers(3, 12),
+    zeros=st.integers(0, 6),
+    base=st.integers(1, 5000),
+    rate=st.floats(0.0, 1.0),
+)
+def test_day_level_results_are_always_finite_and_never_degenerate(seed, d0, d1, zeros, base, rate):
+    rng = np.random.default_rng(seed)
+    s0, s1 = rng.integers(1, base + 2, d0), rng.integers(1, base + 2, d1)
+    o0, o1 = rng.binomial(s0, rate), rng.binomial(s1, rate)
+    pad = np.zeros(zeros)
+    r = day_level_test(np.r_[s0, pad], np.r_[o0, pad], np.r_[pad, s1], np.r_[pad, o1])
+    assert (r.n_days_pre, r.n_days_post) == (d0, d1)  # zero-session days never counted
+    assert r.std_error_pp > 0 and np.isfinite(r.std_error_pp)
+    assert r.change_pp.lower < r.change_pp.estimate < r.change_pp.upper or (
+        r.change_pp.lower < r.change_pp.upper and r.change_pp.lower <= r.change_pp.estimate <= r.change_pp.upper
+    )
+    assert 0.0 <= r.p_value <= 1.0 and np.isfinite(r.degrees_of_freedom) and r.degrees_of_freedom >= 1
+    if r.p_value == 0.0:
+        assert abs(r.t_statistic) > 30  # certainty only from an enormous, well-supported effect
+    text = r.model_dump_json().lower()
+    assert "nan" not in text and "infinity" not in text
 
 
 def _simulate_null(days: int, overdispersion: float, n: int, seed: int):
@@ -244,15 +372,15 @@ def _simulate_null(days: int, overdispersion: float, n: int, seed: int):
 @pytest.mark.parametrize("overdispersion", [0.0, 0.15, 0.4])
 def test_day_level_test_is_calibrated_under_the_null(days, overdispersion):
     """Previously a quasi-binomial test with an estimated, then trusted, dispersion rejected 7.2% at a nominal
-    5% with seven days per window. Measured: 3.1-5.7% rejections and 94.3-96.9% interval coverage across 3 to 28
-    days and no to heavy overdispersion (Monte Carlo error about 0.4 points). Very short windows are slightly
-    conservative, which is the safe side, so only the liberal side is bounded tightly."""
+    5% with seven days per window. Measured: 2.3-5.6% rejections and 94.4-97.7% interval coverage across 3 to 28
+    days and no to heavy overdispersion (Monte Carlo error about 0.3 points). Short windows and clean binomial
+    data are conservative, which is the safe side, so only the liberal side is bounded tightly."""
     s0, o0, s1, o1 = _simulate_null(days, overdispersion, n=4000, seed=100 * days + int(100 * overdispersion))
     core = _day_level_core(s0, o0, s1, o1, 0.95)
     rejection = float(np.mean(core["p"] < 0.05))
     coverage = float(np.mean((core["lower"] <= 0) & (core["upper"] >= 0)))
-    assert 0.025 <= rejection <= 0.062, rejection
-    assert 0.938 <= coverage <= 0.975, coverage
+    assert 0.015 <= rejection <= 0.062, rejection
+    assert 0.938 <= coverage <= 0.985, coverage
 
 
 def test_the_plain_binomial_test_is_not_calibrated_when_days_vary(overdispersion=0.4):
@@ -279,4 +407,4 @@ def test_unequal_window_lengths_are_calibrated_too():
     s0, o0 = arm(60)
     s1, o1 = arm(7)
     core = _day_level_core(s0, o0, s1, o1, 0.95)
-    assert 0.025 <= float(np.mean(core["p"] < 0.05)) <= 0.062
+    assert 0.015 <= float(np.mean(core["p"] < 0.05)) <= 0.062
