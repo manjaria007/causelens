@@ -79,13 +79,36 @@ tell a broad shift from a local break.
 doesn't fix the wrong thing.
 
 #### Acceptance Criteria
-1. FOR EACH candidate event THE SYSTEM SHALL check whether the change's location matches
-   the event's scope (an event that touches all visitors should move all segments).
-2. WHEN an event's scope predicts an effect in segments that show none THE SYSTEM SHALL
-   mark the event as rejected and state the evidence.
+1. FOR EACH candidate event THE SYSTEM SHALL check (a) that the change lies within the
+   event's **exposure scope** (the visitors the event could have touched, as logged) and
+   (b) that the change is consistent with the event's **expected effect pattern**, which is
+   `unspecified` unless the user declares one. An exposure scope of `all` SHALL NOT rule an
+   event out by location alone, and non-significance in a segment SHALL NOT be treated as
+   evidence of no effect there.
+2. THE SYSTEM SHALL mark an event `rejected` only on positive statistical evidence against
+   a named hypothesis: (i) the localized change is disjoint from the event's exposure
+   scope; (ii) a declared expected pattern is contradicted by a direct test of that
+   pattern; or (iii) a calibrated timing contrast rejects the event as the sole immediate
+   source of the change. An onset date (the event date plus the evaluated lag) outside the
+   estimated onset range blocks `supported` and yields `inconclusive`; onset-set exclusion
+   alone SHALL NOT cause `rejected`.
 3. THE SYSTEM SHALL give every candidate a verdict (`supported`, `rejected`, `inconclusive`)
-   with the reason.
+   with the reason, the hypothesis the verdict is about and the lag actually evaluated
+   (default: the effect begins on the event date). The headline SHALL state that lag, for
+   example "supported under the immediate-effect assumption (lag 0)" or "rejected as the
+   sole immediate explanation (lag 0)". A rejection SHALL NOT be reported as the event
+   contributing nothing, and SHALL carry a confidence set for the share of the localized
+   change that begins on the event's onset date. The set may be unbounded or disconnected,
+   and SHALL be reported as unavailable, with a reason, when the contrast cannot be
+   estimated.
 4. THE SYSTEM SHALL always consider at least one alternative to the leading explanation.
+5. THE SYSTEM SHALL report how each verdict changes when each candidate's effect is allowed
+   a one-day lag, evaluating the lags independently per candidate. WHEN two candidates can
+   account for the same onset date at some pair of tested lags THE SYSTEM SHALL mark release
+   attribution `ambiguous` and SHALL NOT report evidence strength above `moderate`.
+6. WHEN a timing verdict depends on a working assumption the data cannot support (too few
+   days, or failed diagnostics) THE SYSTEM SHALL return `inconclusive` and name the
+   assumption.
 
 ### Requirement 6: Estimate causal impact
 
@@ -102,7 +125,9 @@ honest range and the assumptions behind it.
    strength and say why.
 4. THE SYSTEM SHALL translate the segment effect into impact on the overall metric and on
    lost orders over the post-period, each with an interval.
-5. THE SYSTEM SHALL state the identifying assumptions in plain language next to the estimate.
+5. THE SYSTEM SHALL state the identifying assumptions in plain language next to the estimate,
+   including that the comparison segments were not affected by the event. The estimate is a
+   differential effect; attributing it to a named release is a separate, labelled claim.
 6. THE SYSTEM SHALL report evidence strength as `strong`, `moderate`, `weak` or `insufficient`.
 
 ### Requirement 7: Recommend the next experiment

@@ -232,3 +232,87 @@ For each task, record:
   segments) found no violation of closure, row-order invariance, relabeling, padding equivalence, the
   brute-force local set or the reliability rule.
 - The `Stop` hook still has no execution record; these results come from running the commands directly.
+
+## Task 5: candidate testing and causal estimate (branch `task-5-candidate-testing`)
+
+- Spec first, as its own commit (`2484ea6`), with the user's five corrections: (1) evidence strength is judged from
+  the interval, control validity and required checks, and ambiguity only caps at `moderate`; (2) property 8 uses
+  `event_date + evaluated_lag`, and headlines state the lag; (3) `supported` needs a significant step in the
+  observed direction, diagnostics and DiD checks run and passing, and sole-source rejection wins; (4) a single
+  contrast is t on the residual df, a joint restriction is F, pooled variance is `SSE/(n - rank(X))`; (5) Fieller
+  and share sets can be unavailable, with a reason, and coincident columns never give invented coefficients.
+- Decisions: lag 0 is an explicit assumption with a one-day sensitivity per candidate; the equivalence margin is
+  user-declared; `did_cov` defaults to HC1. Measured on 200 null seeds, HC1 covered 95.5% (se 0.049 vs true sd
+  0.045) and date-clustering 99.5% (se 0.065), so clustering was too conservative. Onset-set exclusion only
+  blocks `supported`; it never rejects.
+- Found while building: HC1 variance collapsed on a single-date timing contrast, so single-date contrasts use t on
+  residual df instead; identical timing columns (Hero lag 1 and Checkout lag 0) are marked unidentifiable instead of
+  using a pseudo-inverse; the omnibus uniform test uses the full shared-day covariance rather than diagonal variances
+  (I did not keep a test measuring the power difference).
+- Mistakes of mine: I overwrote my own `tests/test_evidence.py` while believing it did not exist (rewritten, 22 tests); final suite: 604 tests passed, ruff clean;
+  a placeholder test in `test_patterns.py` was left unfinished and was deleted; a too-weak "rare segment" fixture
+  did not trigger the exclusion until its base rate was lowered. Background runs of the calibration were killed when the
+  tool call ended, and a single 11-scenario run timed out at 29 minutes, so the 150-seed runs were split into
+  halves (seeds 1-75 and 76-150) and merged.
+- Results (N = 150 per scenario, full pipeline; tables in `docs/candidate-testing.md`): planted cause recovered in
+  83%, swapped cause in 92%, wrong-event or rejected-truth unflagged in 2% and 0%. `hero_delayed` is identical data to
+  planted, so 83% of those runs name Checkout (flagged ambiguous). Weak effects: -12% recovered in 27% (4% incorrect,
+  unflagged), -6% stops at confirm in 59%. Staged: 29% incorrect unflagged. Indistinguishable same-day events:
+  0 attributed. No change: 1% reach a `supported` verdict.
+- Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.
+
+### Task 5 review round 1 (PR #5, review supplied by the user)
+
+- Eleven findings; every one was reproduced with a failing test before fixing (19 of 22 new tests failed on `aec76b9`;
+  the remaining three were controls). Fixes and measurements are in `docs/candidate-testing.md` ("Review fixes").
+  Sparse segments in the uniform test falsely rejected 37 of 40 uniform datasets (the regression test now allows at most 5 of 40); a Holm p of 0
+  was read as 1; exactly constant groups gave p = 0.0012 from rounding noise; a placebo date that could not be run
+  passed the check; the overall impact divided by focal + comparison traffic instead of all traffic (a focal share of 0.5 instead of 0.1
+  in my reproduction); `sensitivity_lags=(0,)` removed the mandatory one-day check; fractional, negative
+  and boolean lags were coerced; a comma in a segment value crashed candidate testing; a zero step gave NaN bounds;
+  pre-trend slopes were per usable day (0.0285 pp/day for a true 0.01 on a series with two of every three days
+  missing); and the scoring ignored the ambiguity flag on a rejected true cause and counted a gradual effect as correct.
+- Decision: a requested but unevaluable placebo makes the check `not_evaluable` rather than `pass`; an evaluated
+  failure still fails. Lags must be integers, and the API rejects `True`, `0.9`, `-0.9`, NaN and strings instead of
+  rounding them. Lags 0 and 1 are always in the sensitivity set; the argument can only add to them.
+- Correction to my own earlier documentation: the reference interval quoted for the HC1 default was the clustered
+  one. HC1 gives [-0.774, -0.585]; clustered gives [-0.805, -0.555].
+- The calibration was rerun on 150 seeds per scenario. Verdicts did not change; the scoring did (planted incorrect 2%,
+  now all flagged; weak-effect errors split into flagged and unflagged; gradual_hero no longer scores "correct").
+  The runs had to be split into chunks of at most 56 seeds because 29-minute tool calls time out.
+- Results: `.venv/bin/python -m pytest -q` passed (626 tests) and `.venv/bin/python -m ruff check causelens tests` passed.
+
+### Task 5 review round 1, follow-up (verification plan)
+
+- Added the excluded-traffic regressions to `tests/test_patterns.py` (sparse segment excluded with its reason, the
+  other segments' result unchanged by excluding it, a 60-dataset null calibration, and Holm p = 0). All four fail on
+  `aec76b9`'s `patterns.py` and pass now.
+- Sparse-pattern null calibration (`tests/calibration/run_pattern_null.py`, 400 datasets per row) is in
+  `docs/candidate-testing.md`: 2.5% to 5.0% false contradictions from 0 to 10 active days. The attribution scenarios
+  were not rerun because they declare no pattern.
+- The Stop hook now runs Ruff only (separate branch `hook-pytest-on-stop`, not part of this PR). Its execution by
+  Kiro is still unverified.
+- Verification order from now on: the new regression and the affected module after each change, dependent integration
+  tests once a block is stable, and the full suite and Ruff once after the final code change.
+
+### Task 5 review round 2 (PR #5): excluded traffic strengthened the uniform test
+
+- The first fix (`7aebc9f`) excluded sparse segments but left the covariance and degrees of freedom on the global day
+  count. Adding an excluded segment that was active every day raised the same included observations from 2 to 19
+  denominator df. In a 40-day reproduction (both included groups on 3 active days per window, a `dead` segment with
+  sessions and no orders) 29 of 200 datasets flipped to `contradicted`; one went from adjusted p 0.068 to 0.00035.
+- My follow-up commit `b66220c` did not fix this. Its regression used included groups present every day, so it could
+  not see the problem, and its calibration used a different sampling setup. I reported it as done; it was not.
+- The fix: sampling units are the days on which an included segment has sessions, and
+  `nu = min(d_pre, d_post, active days of the sparsest included segment) - 1`. The new regressions fail on `b66220c`
+  (6 of 6) and pass now; the boundary calibration shows 0 of 400 verdicts changed by excluded traffic at 3, 4, 5, 8
+  and 15 active days. A side effect: the test is conservative when a sparse segment is included (0/400 false
+  contradictions at 3 and 5 active days in that setup), so its power is lower there.
+- Hooks: the workspace `/projects/sandbox/.kiro/hooks/pytest-on-stop.json` was the active full-suite Stop hook (it is
+  outside git). It is replaced by `ruff-on-stop.json` (Ruff only), the same file is now on this branch, and
+  `pytest-on-save.json` (full suite on every save of a `causelens/*.py` file) is removed from this branch. The
+  untracked prompt hook that ran the full suite after each task is now `ruff-after-task.json` (Ruff only). The
+  separate `hook-pytest-on-stop` branch holds an identical `ruff-on-stop.json` and is redundant with this one. Save
+  hooks do not run in Kiro Web, and no automatic execution of any hook has been verified.
+- Verification order: the new regression and the affected module after each change, dependent integration tests once
+  a block is stable, and the full suite and Ruff once after the final code change.

@@ -22,12 +22,12 @@
   - [x] 4.3 Property test: decomposition closes; invariance to row order and labels
   - _Requirements: 4.1–4.5_
 
-- [ ] 5. Candidate testing and causal estimate
-  - [ ] 5.1 `test_event_scope` verdicts with evidence
-  - [ ] 5.2 `estimate_did`, `check_pre_trends`, `run_placebo`
-  - [ ] 5.3 `project_impact` to overall pp and lost orders
-  - [ ] 5.4 Evidence-strength rules
-  - [ ] 5.5 Property tests: CI ordering, null calibration over 50 seeds, monotonicity
+- [x] 5. Candidate testing and causal estimate
+  - [x] 5.1 `test_event_scope` verdicts with evidence
+  - [x] 5.2 `estimate_did`, `check_pre_trends`, `run_placebo`
+  - [x] 5.3 `project_impact` to overall pp and lost orders
+  - [x] 5.4 Evidence-strength rules
+  - [x] 5.5 Property tests: CI ordering, null calibration over 50 seeds, monotonicity
   - _Requirements: 5.1–5.4, 6.1–6.6_
 
 - [ ] 6. Experiment design
