@@ -376,3 +376,11 @@ For each task, record:
 - Mutation checks: six mutations of the fixes (control required again, lag-limited candidates dropped, one shared target,
   null cell ignored, no exhaustive scan, cap tested after the overshoot) were each caught by a named review test.
 - Verification order: the new regressions and affected modules after each change, then the full suite once at the end.
+
+### Task 6 review round 2 (PR #6): wording of the alternative note
+
+- `alternative_note` hard-coded "not at lag 1" and "a one-day delay", which was wrong when Checkout is declared at lag 1
+  and open at lag 0 (reproduced with `lag_days={Checkout: 1}`: the note said Checkout was not rejected at lag 1 while
+  the arm metadata correctly said lag 0). The note now quotes each arm's own `hypothesis_limit`, and that text names the
+  actual lag ("immediately (lag 0)" or "with a 1-day delay (lag 1)"). The unsized-alternative path uses the same text.
+- A wording-only change: verified with the focused review and design tests (65 passed) and Ruff; the full suite was not rerun.

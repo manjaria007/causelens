@@ -385,13 +385,15 @@ def _open_onset(c: CandidateVerdict) -> Date | None:
 
 
 def _limit_note(c: CandidateVerdict, onset: Date) -> str | None:
+    """Why a candidate that was rejected at its declared lag still has an arm, stated with the lags actually evaluated."""
     if c.verdict != "rejected":
         return None
     lag = next((o.lag_days for o in c.lag_sensitivity if o.onset_date == onset), None)
     what = "the sole immediate explanation" if c.lag_days == 0 else f"the sole explanation at lag {c.lag_days}"
+    when = "immediately (lag 0)" if lag == 0 else f"with a {lag}-day delay (lag {lag})"
     return (
-        f"hypothesis-limited: {c.event} was rejected as {what} but not at lag {lag} (onset {onset}); this arm tests its current "
-        f"contribution only if it acts with that delay"
+        f"hypothesis-limited: {c.event} was rejected as {what} but not at lag {lag} (onset {onset}); "
+        f"this arm tests its current contribution only if it acts {when}"
     )
 
 
@@ -610,17 +612,14 @@ def design_experiment(
     if arms == "leading" and len(open_) >= 2:
         alt_onsets = [(c, open_onset[c.event]) for c in open_]
         alt_sized = _arm_mdes(alt_onsets, panel, declared, baseline_rate)
-        limited = [c.event for c in open_ if c.verdict == "rejected"]
+        limit_notes = [n for c, o in alt_onsets if (n := _limit_note(c, o))]
         base_note = (
             f"Offered because {len(open_)} candidates are still open: if independent rollbacks are feasible and comparing their "
             f"contributions is the objective, run {len(open_)} rollback arms against one shared control (alpha {alpha:g} divided by "
             f"{len(open_)}; power {power:g} is per comparison, not for the whole experiment)."
         )
-        if limited:
-            base_note += (
-                " " + ", ".join(limited) + " stays open only as a lag-limited alternative: it was rejected at its declared lag "
-                "but not at lag 1, so its arm tests whether it contributes if it acts with a one-day delay."
-            )
+        if limit_notes:
+            base_note += " The following arms are lag-limited alternatives: " + "; ".join(limit_notes) + "."
         if isinstance(alt_sized, str):
             alt_note = base_note + f" It cannot be sized yet: {alt_sized}. Declare a business target with mde_pp."
         else:

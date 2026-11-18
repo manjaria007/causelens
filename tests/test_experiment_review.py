@@ -268,3 +268,36 @@ def test_07_a_size_below_the_cap_is_returned_even_when_doubling_overshoots_it():
 def test_07_a_size_above_the_cap_still_raises():
     with pytest.raises(ValueError, match="too small"):
         power_analysis(0.03, 0.00004)
+
+
+# ------------------------------------------------------------------ 8. the alternative note reuses each arm's own limit
+
+
+def test_08_the_alternative_note_uses_each_arms_actual_lag_not_a_hard_coded_one():
+    metrics, events = scenario_data(42, "planted")
+    _, res = run_pipeline(metrics, events, lag_days={CHECKOUT: 1})  # Checkout declared at lag 1 but open at lag 0
+    assert {o.lag_days: o.verdict for o in cand(res, CHECKOUT).lag_sensitivity} == {0: "supported", 1: "rejected"}
+    d = design_experiment(metrics, res, POST, events=events, target_candidate=HERO, mde_pp=0.4)
+    limits = {a.rollback_of: a.hypothesis_limit for a in d.alternative_plan.arms[1:]}
+    assert all(limits.values()) and "not at lag 1" in limits[HERO] and "not at lag 0" in limits[CHECKOUT]
+    for text in limits.values():
+        assert text in d.alternative_note  # each arm's own wording, verbatim
+    note_for_checkout = d.alternative_note.split(limits[HERO])[-1]
+    assert "not at lag 1" not in note_for_checkout and "one-day delay" not in note_for_checkout
+    assert "acts immediately (lag 0)" in limits[CHECKOUT] and "with a 1-day delay (lag 1)" in limits[HERO]
+
+
+def test_08_the_note_keeps_its_wording_for_the_reference_case(planted):
+    metrics, events, res = planted
+    d = design_experiment(metrics, res, POST, events=events, mde_pp=0.4)
+    (limit,) = [a.hypothesis_limit for a in d.alternative_plan.arms if a.hypothesis_limit]
+    assert limit in d.alternative_note and "not at lag 1" in d.alternative_note and "lag-limited" in d.alternative_note
+
+
+def test_08_an_unsized_alternative_also_carries_the_arm_limits(planted):
+    metrics, events, res = planted
+    focal_only = metrics[(metrics.device == "mobile") & (metrics.browser == "safari")]
+    d = design_experiment(focal_only, res, POST, events=events)  # Checkout has a stored estimate; Hero would need a control group
+    assert d.status == "ok" and d.alternative_plan is None
+    hero_limit = "hypothesis-limited: " + HERO + " was rejected as the sole immediate explanation but not at lag 1"
+    assert hero_limit in d.alternative_note and "cannot be sized yet" in d.alternative_note
