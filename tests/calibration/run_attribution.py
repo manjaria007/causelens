@@ -12,6 +12,8 @@ Grades (per run):
 * ``correct``                 the truth is identified (or, for no/indistinguishable cause, nothing is supported)
 * ``unmet``                   the truth is not identified but nothing wrong is claimed (an inconclusive outcome)
 * ``stopped``                 ``confirm_change`` stopped the investigation (no change to explain)
+* ``event_recovered_step_misspecified``  (gradual_hero only) the right event is supported, but the effect was a ramp,
+                              so the single immediate-step hypothesis the verdict states is not the true one
 * ``incorrect_flagged``       a wrong event is ``supported`` but release attribution is marked ambiguous
 * ``incorrect_unflagged``     a wrong event is ``supported`` or the true event ``rejected``, with no ambiguity flag
 
@@ -55,8 +57,13 @@ def grade(scenario: str, rec: dict) -> str:
         return "stopped"
     v = rec["verdict"]
     supported = [e for e, x in v.items() if x == "supported"]
-    amb = any(rec["ambiguous"].get(e, False) for e in supported)
     truth = SCENARIOS[scenario]
+    # The ambiguity flag that matters is the one on every event involved in the error: any wrongly supported
+    # event, and the true event when it was rejected.
+    involved = set(supported)
+    if truth.cause is not None and v.get(truth.cause) == "rejected":
+        involved.add(truth.cause)
+    amb = any(rec["ambiguous"].get(e, False) for e in involved)
     wrong_flag = "incorrect_flagged" if amb else "incorrect_unflagged"
     if truth.cause is None:  # nothing (or nothing separable) acted: any supported event is an incorrect attribution
         return wrong_flag if supported else "correct"
@@ -64,7 +71,7 @@ def grade(scenario: str, rec: dict) -> str:
         cause = truth.cause
         other = HERO if cause == CHECKOUT else CHECKOUT
         if other in supported or v.get(cause) == "rejected":
-            return wrong_flag if amb else "incorrect_unflagged"
+            return wrong_flag
         return "correct" if v.get(cause) == "supported" else "unmet"
     if scenario == "hero_delayed":  # Hero acted after a one-day delay; the lag-0 headline can only see Checkout
         if CHECKOUT in supported:
@@ -75,7 +82,11 @@ def grade(scenario: str, rec: dict) -> str:
             return wrong_flag
         return "unmet"
     if scenario == "gradual_hero":
-        return wrong_flag if CHECKOUT in supported else ("unmet" if HERO not in supported else "correct")
+        # Hero did act, but through a three-day ramp, so "an immediate step at its date" is not the true hypothesis.
+        # Naming the event is reported separately from the correctness of the step hypothesis.
+        if CHECKOUT in supported:
+            return wrong_flag
+        return "event_recovered_step_misspecified" if HERO in supported else "unmet"
     raise KeyError(scenario)
 
 
@@ -95,13 +106,13 @@ def pct(k: int, n: int) -> str:
 
 
 def summarize(results: dict[str, list[dict]]) -> str:
-    lines = ["| scenario | n | correct | unmet (inconclusive) | stopped | incorrect, flagged ambiguous | incorrect, unflagged |", "|---|---|---|---|---|---|---|"]
+    lines = ["| scenario | n | correct | event recovered, step misspecified | unmet (inconclusive) | stopped | incorrect, flagged ambiguous | incorrect, unflagged |", "|---|---|---|---|---|---|---|---|"]
     detail = []
     for scenario, recs in results.items():
         n = len(recs)
         g = collections.Counter(grade(scenario, r) for r in recs)
         lines.append(
-            f"| {scenario} | {n} | {pct(g['correct'], n)} | {pct(g['unmet'], n)} | {pct(g['stopped'], n)} | "
+            f"| {scenario} | {n} | {pct(g['correct'], n)} | {pct(g['event_recovered_step_misspecified'], n)} | {pct(g['unmet'], n)} | {pct(g['stopped'], n)} | "
             f"{pct(g['incorrect_flagged'], n)} | {pct(g['incorrect_unflagged'], n)} |"
         )
         tested = [r for r in recs if r["stage"] == "tested"]

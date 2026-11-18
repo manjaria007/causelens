@@ -145,6 +145,11 @@ def uniform_test(
             n0, n1 = float(o0[seg].sum()), float(o1[seg].sum())
             if float(s0[seg].sum()) <= 0 or float(s1[seg].sum()) <= 0:
                 excluded[seg] = "no sessions in a window"
+            elif int((s0[seg] > 0).sum()) < MIN_DAYS_PER_WINDOW or int((s1[seg] > 0).sum()) < MIN_DAYS_PER_WINDOW:
+                excluded[seg] = (
+                    f"fewer than {MIN_DAYS_PER_WINDOW} active days (days with sessions) in a window, so its day-level "
+                    "variance cannot be estimated"
+                )
             elif n0 < MIN_ORDERS_PER_WINDOW or n1 < MIN_ORDERS_PER_WINDOW:
                 excluded[seg] = f"fewer than {MIN_ORDERS_PER_WINDOW} pooled orders in a window (zero or near-zero rate)"
             else:
@@ -191,7 +196,7 @@ def uniform_test(
     adj = holm_adjust([parts[i].p_value for i in tested])  # type: ignore[misc]
     for i, a in zip(tested, adj, strict=True):
         parts[i] = parts[i].model_copy(update={"p_value_holm": a})
-    bad = [parts[i] for i in tested if (parts[i].p_value_holm or 1.0) < alpha]
+    bad = [parts[i] for i in tested if parts[i].p_value_holm is not None and parts[i].p_value_holm < alpha]
     if bad:
         names = ", ".join(f"{b.dimension} (Holm p = {b.p_value_holm:.3g})" for b in bad)
         return PatternCheck(

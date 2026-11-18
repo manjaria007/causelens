@@ -416,7 +416,7 @@ def analyze_timing(
             cands[nm] = _empty_timing(nm, onset, "the step's variance is not estimable", level)
             continue
         beta, t, p = step_stats[g]
-        se = abs(beta / t) if t else float("nan")
+        se = math.sqrt(fit.sigma2 * float(fit.M[g, g]))  # from the covariance directly; beta / t is 0 / 0 when beta == 0
         direction = None if total == 0 or beta == 0 else bool(np.sign(beta) == np.sign(total))
         ss = None
         if nm in sole:

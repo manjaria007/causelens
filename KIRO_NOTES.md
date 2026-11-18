@@ -260,3 +260,24 @@ For each task, record:
   unflagged), -6% stops at confirm in 59%. Staged: 29% incorrect unflagged. Indistinguishable same-day events:
   0 attributed. No change: 1% reach a `supported` verdict.
 - Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.
+
+### Task 5 review round 1 (PR #5, review supplied by the user)
+
+- Eleven findings; every one was reproduced with a failing test before fixing (19 of 22 new tests failed on `aec76b9`;
+  the remaining three were controls). Fixes and measurements are in `docs/candidate-testing.md` ("Review fixes").
+  Sparse segments in the uniform test falsely rejected 37 of 40 uniform datasets (the regression test now allows at most 5 of 40); a Holm p of 0
+  was read as 1; exactly constant groups gave p = 0.0012 from rounding noise; a placebo date that could not be run
+  passed the check; the overall impact divided by focal + comparison traffic instead of all traffic (a focal share of 0.5 instead of 0.1
+  in my reproduction); `sensitivity_lags=(0,)` removed the mandatory one-day check; fractional, negative
+  and boolean lags were coerced; a comma in a segment value crashed candidate testing; a zero step gave NaN bounds;
+  pre-trend slopes were per usable day (0.0285 pp/day for a true 0.01 on a series with two of every three days
+  missing); and the scoring ignored the ambiguity flag on a rejected true cause and counted a gradual effect as correct.
+- Decision: a requested but unevaluable placebo makes the check `not_evaluable` rather than `pass`; an evaluated
+  failure still fails. Lags must be integers, and the API rejects `True`, `0.9`, `-0.9`, NaN and strings instead of
+  rounding them. Lags 0 and 1 are always in the sensitivity set; the argument can only add to them.
+- Correction to my own earlier documentation: the reference interval quoted for the HC1 default was the clustered
+  one. HC1 gives [-0.774, -0.585]; clustered gives [-0.805, -0.555].
+- The calibration was rerun on 150 seeds per scenario. Verdicts did not change; the scoring did (planted incorrect 2%,
+  now all flagged; weak-effect errors split into flagged and unflagged; gradual_hero no longer scores "correct").
+  The runs had to be split into chunks of at most 56 seeds because 29-minute tool calls time out.
+- Results: `.venv/bin/python -m pytest -q` passed (626 tests) and `.venv/bin/python -m ruff check causelens tests` passed.

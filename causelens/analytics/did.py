@@ -63,7 +63,7 @@ class Panel(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     daily: pd.DataFrame = Field(
-        description="Index: every date in the data. Columns s_f, o_f, s_c, o_c (counts), usable (bool), "
+        description="Index: every date in the data. Columns s_f, o_f, s_c, o_c (counts), s_all (sessions of the whole population, including traffic in neither group), usable (bool), "
         "rate_f, rate_c (fractions) and diff_pp (focal minus comparison, pp); NaN where not usable."
     )
     focal: list[dict[str, str]]
@@ -137,8 +137,9 @@ def build_panel(
         return g.reindex(all_days).fillna(0.0).astype(float)
 
     f, c = daily_sum(fmask), daily_sum(cmask)
+    total = data.groupby("date")["sessions"].sum().reindex(all_days).fillna(0.0).astype(float)
     daily = pd.DataFrame(
-        {"s_f": f["sessions"], "o_f": f["orders"], "s_c": c["sessions"], "o_c": c["orders"]}, index=all_days
+        {"s_f": f["sessions"], "o_f": f["orders"], "s_c": c["sessions"], "o_c": c["orders"], "s_all": total}, index=all_days
     )
     daily.index.name = "date"
     status_ok = (prepared.daily["status"] == "ok").to_numpy()
@@ -173,6 +174,10 @@ def _wls(
         res = model.fit(cov_type="HC1")
         df = float(res.df_resid)
     est, se = float(res.params[index]), float(res.bse[index])
+    # Residuals at rounding level mean the data are exactly fitted (for example, two groups that never change):
+    # the standard error is then rounding noise, and a "significant" effect from it would be spurious.
+    if np.max(np.abs(res.resid)) <= 1e-9 * max(1.0, float(np.max(np.abs(y)))):
+        raise ValueError("regression is not estimable (degenerate: the data are fitted exactly, with no residual variation)")
     if not (math.isfinite(est) and math.isfinite(se)) or se <= 0 or df < 1:
         raise ValueError("regression is not estimable (degenerate variance or too few clusters)")
     t = est / se
@@ -350,7 +355,8 @@ def pre_trends_on_panel(
     n = len(index)
     if n < MIN_PRE_DAYS_FOR_TREND:
         return PreTrendResult(status="not_evaluable", reason=f"only {n} usable pre-period days (need {MIN_PRE_DAYS_FOR_TREND})", n_days=n, onset=onset.date())
-    t = np.concatenate([np.arange(n), np.arange(n)]).astype(float)
+    elapsed = np.asarray((index - index[0]).days, dtype=float)  # calendar days, so missing days do not compress the slope
+    t = np.concatenate([elapsed, elapsed])
     t = t - t.mean()
     X = np.column_stack([np.ones(2 * n), treated, t, treated * t])
     try:
@@ -457,8 +463,14 @@ def placebo_on_panel(
                              n_attempted=len(fakes), n_evaluated=0, onset=onset.date())
     adj = holm_adjust([p for _, _, p in results])
     placebos = [PlaceboEffect(fake_date=d, effect_pp=ci, p_value=p, p_value_holm=a) for (d, ci, p), a in zip(results, adj, strict=True)]
-    status: CheckStatus = "fail" if any(a < PLACEBO_ALPHA for a in adj) else "pass"
-    reason = None if len(results) == len(fakes) else f"{len(fakes) - len(results)} of {len(fakes)} placebo dates could not be estimated"
+    complete = len(results) == len(fakes)
+    reason = None if complete else f"{len(fakes) - len(results)} of {len(fakes)} placebo dates could not be estimated"
+    if any(a < PLACEBO_ALPHA for a in adj):
+        status: CheckStatus = "fail"  # a failure among the evaluated dates stands
+    elif not complete:
+        status = "not_evaluable"  # an unevaluated required placebo is incomplete, never a pass
+    else:
+        status = "pass"
     return PlaceboResult(status=status, reason=reason, placebos=placebos, n_attempted=len(fakes), n_evaluated=len(results), onset=onset.date())
 
 
@@ -501,7 +513,7 @@ class ImpactResult(BaseModel):
 def project_impact(did: DidResult, panel: Panel) -> ImpactResult:
     """Scale a segment's differential effect to the overall metric and to orders over the post period.
 
-    ``overall = effect * focal share of post-period sessions`` and ``orders change = effect * focal post
+    ``overall = effect * focal share of all post-period sessions`` (the whole population, including traffic in neither group) and ``orders change = effect * focal post
     sessions``; the DiD interval is scaled, so ``lower <= estimate <= upper`` is preserved. The post-period
     traffic is treated as known: only the DiD estimate carries uncertainty.
     """
@@ -519,8 +531,8 @@ def project_impact(did: DidResult, panel: Panel) -> ImpactResult:
     onset = pd.Timestamp(did.event_date)
     use = panel.daily[panel.daily["usable"].to_numpy(dtype=bool)]
     post = use[use.index >= onset]
-    f_post, c_post = float(post["s_f"].sum()), float(post["s_c"].sum())
-    total = f_post + c_post
+    f_post = float(post["s_f"].sum())
+    total = float(post["s_all"].sum())  # the whole population's traffic, also when an explicit comparison group is used
     if total <= 0 or f_post <= 0:
         return ImpactResult(status="unavailable", reason="no post-period traffic", focal_sessions_post=int(f_post),
                             total_sessions_post=int(total), n_days_post=len(post), assumptions=assumptions)

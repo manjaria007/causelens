@@ -189,10 +189,6 @@ def _label(seg: Mapping[str, str]) -> str:
     return ", ".join(f"{k}={v}" for k, v in seg.items())
 
 
-def _parse_label(label: str) -> dict[str, str]:
-    return dict(term.split("=", 1) for term in label.split(", "))
-
-
 def _headline(name: str, verdict: Verdict, lag: int, ground: str | None = None) -> str:
     if verdict == "supported":
         if lag == 0:
@@ -265,6 +261,36 @@ def _onset_set(
                                apply_exclusions=apply_exclusions, detector_params=detector_params)
 
 
+MANDATORY_SENSITIVITY_LAGS = (0, 1)
+
+
+def _as_lag(value: object, what: str) -> int:
+    """A non-negative whole number of days. Booleans, fractions, NaN and strings are rejected, never rounded."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{what} must be an integer number of days, got {value!r}")  # noqa: TRY004 (the API reports bad arguments as ValueError)
+    if value < 0:
+        raise ValueError(f"{what} must be non-negative, got {value!r}")
+    return int(value)
+
+
+def _localized_segments(dec: DecompositionResult) -> list[dict[str, str]]:
+    """Structured segment labels of the localization, taken from the partition rather than parsed from display text."""
+    assert dec.localization is not None
+    part = next((p for p in dec.partitions if p.name == dec.localization.partition), None)
+    if part is None:
+        raise ValueError(f"the localization's partition {dec.localization.partition!r} is not in the decomposition")
+    by_label: dict[str, list[dict[str, str]]] = {}
+    for seg in part.segments:
+        by_label.setdefault(seg.label, []).append(dict(seg.labels))
+    out: list[dict[str, str]] = []
+    for label in dec.localization.segments:
+        found = by_label.get(label, [])
+        if len(found) != 1:
+            raise ValueError(f"cannot identify the localized segment {label!r} unambiguously in partition {part.name!r}")
+        out.append(found[0])
+    return out
+
+
 def _window(name: str, w: Window) -> tuple[Date, Date]:
     try:
         a, b = (pd.Timestamp(x).date() for x in w)
@@ -302,15 +328,14 @@ def test_candidates(
 
     The focal segment is the Task 4 localization unless ``focal`` is given. Candidates are Task 3's matches to
     the focal series' onset set unless ``candidates`` (event names) is given. ``lag_days`` sets each
-    candidate's declared lag (default 0); every lag in ``sensitivity_lags`` is also evaluated, independently
-    per candidate. Raises ``ValueError`` on invalid arguments; thin data gives ``inconclusive`` verdicts with
+    candidate's declared lag (default 0); lags 0 and 1 are always also evaluated (mandatory one-day sensitivity), plus
+    any extra lag in ``sensitivity_lags``, independently per candidate. Raises ``ValueError`` on invalid arguments; thin data gives ``inconclusive`` verdicts with
     the reason, never a partial result.
     """
     if not 1e-12 <= alpha <= 0.5 or not 0 < level < 1:
         raise ValueError("alpha must be in [1e-12, 0.5] and level in (0, 1)")
-    sens = sorted({int(x) for x in sensitivity_lags})
-    if not sens or sens[0] < 0:
-        raise ValueError("sensitivity_lags must be non-negative integers")
+    # The one-day check is mandatory: lags 0 and 1 are always evaluated, and ``sensitivity_lags`` can only add to them.
+    sens = sorted({*MANDATORY_SENSITIVITY_LAGS, *(_as_lag(x, "sensitivity_lags entries") for x in sensitivity_lags)})
     pre, post = _window("pre", pre_window), _window("post", post_window)
     if pre[1] >= post[0]:
         raise ValueError("the pre window must end before the post window starts")
@@ -336,7 +361,7 @@ def test_candidates(
                 assumptions=["Without a localized segment there is no unaffected comparison, so a differential effect cannot be estimated."],
                 summary=f"No candidate can be tested: {why} Consider a randomized experiment on the broad change.",
             )
-        segs = [_parse_label(label) for label in dec.localization.segments]
+        segs = _localized_segments(dec)
         source, localized_significant = "localization", dec.localization.all_selected_significant
 
     panel = build_panel(data, segs, events=ev, quality=quality, apply_exclusions=apply_exclusions)
@@ -374,13 +399,11 @@ def test_candidates(
         )
 
     patterns = dict(expected_patterns or {})
-    lags = {n: int((lag_days or {}).get(n, 0)) for n in names}
+    lags = {n: _as_lag((lag_days or {}).get(n, 0), f"lag_days[{n!r}]") for n in names}
     for mapping_name, mp in (("expected_patterns", patterns), ("lag_days", dict(lag_days or {}))):
         unknown = [k for k in mp if k not in names]
         if unknown:
             raise ValueError(f"{mapping_name} names events that are not candidates: {unknown}")
-    if any(v < 0 for v in lags.values()):
-        raise ValueError("lag_days must be non-negative")
     edates: dict[str, Date] = {n: rows.loc[n, "date"].date() for n in names}
 
     usable = panel.usable_days
