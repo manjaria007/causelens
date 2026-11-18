@@ -1,4 +1,10 @@
 """Deterministic analytics tools. No network or LLM calls."""
+from causelens.analytics.candidates import (
+    CandidateTestingResult,
+    CandidateVerdict,
+    test_candidates,
+    test_event_scope,
+)
 from causelens.analytics.changepoint import (
     CandidateMatchResult,
     ChangePointResult,
@@ -25,6 +31,18 @@ from causelens.analytics.decompose import (
     decompose_change,
     two_proportion_test,
 )
+from causelens.analytics.did import (
+    DidResult,
+    ImpactResult,
+    PlaceboResult,
+    PreTrendResult,
+    build_panel,
+    check_pre_trends,
+    estimate_did,
+    project_impact,
+    run_placebo,
+)
+from causelens.analytics.evidence import EvidenceAssessment, assess_evidence
 from causelens.analytics.loaders import (
     DIMENSIONS,
     EVENT_TYPES,
@@ -35,6 +53,7 @@ from causelens.analytics.loaders import (
     validate_events,
     validate_metrics,
 )
+from causelens.analytics.patterns import ExpectedPattern, PatternCheck
 from causelens.analytics.series import (
     ExclusionDisclosure,
     PreparedSeries,
@@ -45,6 +64,8 @@ __all__ = [
     "DIMENSIONS",
     "EVENT_TYPES",
     "CandidateMatchResult",
+    "CandidateTestingResult",
+    "CandidateVerdict",
     "ChangePointResult",
     "ConfirmChangeResult",
     "DataQualityFlag",
@@ -52,25 +73,40 @@ __all__ = [
     "DataValidationError",
     "DecompositionResult",
     "DetectorParams",
+    "DidResult",
     "EventCandidate",
+    "EvidenceAssessment",
     "ExclusionDisclosure",
     "ExclusionSummary",
+    "ExpectedPattern",
+    "ImpactResult",
     "LinkedEvent",
     "PartitionResult",
+    "PatternCheck",
+    "PlaceboResult",
+    "PreTrendResult",
     "PreparedSeries",
     "SegmentEffect",
     "apply_default_exclusions",
+    "assess_evidence",
     "benjamini_hochberg",
+    "build_panel",
     "check_data_quality",
+    "check_pre_trends",
     "confirm_change",
     "day_level_test",
     "decompose_change",
     "detect_change_point",
+    "estimate_did",
     "load_events",
     "load_metrics",
     "match_event_candidates",
     "parse_scope",
     "prepare_daily_series",
+    "project_impact",
+    "run_placebo",
+    "test_candidates",
+    "test_event_scope",
     "two_proportion_test",
     "validate_events",
     "validate_metrics",

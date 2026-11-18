@@ -232,3 +232,31 @@ For each task, record:
   segments) found no violation of closure, row-order invariance, relabeling, padding equivalence, the
   brute-force local set or the reliability rule.
 - The `Stop` hook still has no execution record; these results come from running the commands directly.
+
+## Task 5: candidate testing and causal estimate (branch `task-5-candidate-testing`)
+
+- Spec first, as its own commit (`2484ea6`), with the user's five corrections: (1) evidence strength is judged from
+  the interval, control validity and required checks, and ambiguity only caps at `moderate`; (2) property 8 uses
+  `event_date + evaluated_lag`, and headlines state the lag; (3) `supported` needs a significant step in the
+  observed direction, diagnostics and DiD checks run and passing, and sole-source rejection wins; (4) a single
+  contrast is t on the residual df, a joint restriction is F, pooled variance is `SSE/(n - rank(X))`; (5) Fieller
+  and share sets can be unavailable, with a reason, and coincident columns never give invented coefficients.
+- Decisions: lag 0 is an explicit assumption with a one-day sensitivity per candidate; the equivalence margin is
+  user-declared; `did_cov` defaults to HC1. Measured on 200 null seeds, HC1 covered 95.5% (se 0.049 vs true sd
+  0.045) and date-clustering 99.5% (se 0.065), so clustering was too conservative. Onset-set exclusion only
+  blocks `supported`; it never rejects.
+- Found while building: HC1 variance collapsed on a single-date timing contrast, so single-date contrasts use t on
+  residual df instead; identical timing columns (Hero lag 1 and Checkout lag 0) are marked unidentifiable instead of
+  using a pseudo-inverse; the omnibus uniform test uses the full shared-day covariance rather than diagonal variances
+  (I did not keep a test measuring the power difference).
+- Mistakes of mine: I overwrote my own `tests/test_evidence.py` while believing it did not exist (rewritten, 22 tests); final suite: 604 tests passed, ruff clean;
+  a placeholder test in `test_patterns.py` was left unfinished and was deleted; a too-weak "rare segment" fixture
+  did not trigger the exclusion until its base rate was lowered. Background runs of the calibration were killed when the
+  tool call ended, and a single 11-scenario run timed out at 29 minutes, so the 150-seed runs were split into
+  halves (seeds 1-75 and 76-150) and merged.
+- Results (N = 150 per scenario, full pipeline; tables in `docs/candidate-testing.md`): planted cause recovered in
+  83%, swapped cause in 92%, wrong-event or rejected-truth unflagged in 2% and 0%. `hero_delayed` is identical data to
+  planted, so 83% of those runs name Checkout (flagged ambiguous). Weak effects: -12% recovered in 27% (4% incorrect,
+  unflagged), -6% stops at confirm in 59%. Staged: 29% incorrect unflagged. Indistinguishable same-day events:
+  0 attributed. No change: 1% reach a `supported` verdict.
+- Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.

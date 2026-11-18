@@ -102,3 +102,37 @@ def segmented(
             rows.append({**DEFAULT_SEGMENT, **{k: spec[k] for k in DEFAULT_SEGMENT if k in spec},
                          "date": d, "sessions": int(sessions), "orders": int(orders)})
     return pd.DataFrame(rows)[["date", *DEFAULT_SEGMENT, "sessions", "orders"]]
+
+
+def focal_comparison_frame(
+    seed: int,
+    n_days: int = 70,
+    steps: dict[int, float] | None = None,
+    base_rate: float = 0.04,
+    sessions_focal: int = 6000,
+    sessions_comparison: int = 14000,
+    trend_per_day: float = 0.0,
+    start: str = START,
+) -> pd.DataFrame:
+    """Two segments (focal = mobile/safari, comparison = desktop/chrome) with binomial orders.
+
+    ``steps`` maps a day index to a *relative* change of the focal conversion that starts that day and persists
+    (changes accumulate: ``{30: -0.1, 31: -0.1}`` is a staged drop). ``trend_per_day`` adds a linear relative
+    drift to the focal conversion. Sessions are Poisson with a weekday pattern.
+    """
+    rng = np.random.default_rng(seed)
+    days = pd.date_range(start, periods=n_days)
+    wd = days.day_of_week.to_numpy()
+    level = np.ones(n_days)
+    for k, rel in (steps or {}).items():
+        level[k:] *= 1 + rel
+    level *= 1 + trend_per_day * np.arange(n_days)
+    rows = []
+    for name, dev, brw, base_s, mult in (("focal", "mobile", "safari", sessions_focal, level), ("comp", "desktop", "chrome", sessions_comparison, np.ones(n_days))):
+        sess = rng.poisson(base_s * WEEKDAY_TRAFFIC[wd] * rng.normal(1.0, 0.03, n_days))
+        p = np.clip(base_rate * WEEKDAY_CONV[wd] * rng.normal(1.0, 0.012, n_days) * mult, 0, 0.9)
+        orders = rng.binomial(sess, p)
+        for i, d in enumerate(days):
+            rows.append({"date": d.strftime("%Y-%m-%d"), "device": dev, "browser": brw, "channel": "organic",
+                         "customer_type": "new", "sessions": int(sess[i]), "orders": int(orders[i])})
+    return pd.DataFrame(rows)
