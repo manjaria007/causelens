@@ -30,10 +30,10 @@
   - [x] 5.5 Property tests: CI ordering, null calibration over 50 seeds, monotonicity
   - _Requirements: 5.1–5.4, 6.1–6.6_
 
-- [ ] 6. Experiment design
-  - [ ] 6.1 `power_analysis` (two-proportion)
-  - [ ] 6.2 `design_experiment` using observed traffic for duration
-  - [ ] 6.3 Property test: power monotonicity
+- [x] 6. Experiment design
+  - [x] 6.1 `power_analysis` (two-proportion)
+  - [x] 6.2 `design_experiment` using observed traffic for duration
+  - [x] 6.3 Property test: power monotonicity
   - _Requirements: 7.1–7.4_
 
 - [ ] 7. MCP server

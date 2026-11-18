@@ -316,3 +316,71 @@ For each task, record:
   hooks do not run in Kiro Web, and no automatic execution of any hook has been verified.
 - Verification order: the new regression and the affected module after each change, dependent integration tests once
   a block is stable, and the full suite and Ruff once after the final code change.
+
+## Task 6: experiment design (branch `task-6-experiment-design`)
+
+- Contract agreed before coding, with the user's corrections: `baseline` is a fraction and `mde_pp` a signed
+  percentage-point change (`target_rate = baseline + mde_pp / 100`); power is reported as "achieved power under the
+  normal approximation", not exact power; alpha, power, allocation and the resulting rates are validated.
+  A user-declared business target is preferred. The nearest-zero interval bound is only a clearly labelled provisional
+  planning heuristic that does not correct winner's curse, with its sign reversed for a rollback; with no usable
+  estimate the result is `needs_input`. The baseline is the usable post-period focal conversion with its window and
+  counts. The default is a two-arm rollback of the leading candidate (current contribution, other releases fixed, not the
+  sole historical cause), with a shared-control multi-arm option and alpha divided by the number of comparisons, power
+  labelled per comparison. Guardrails are labelled by what can be measured. Session randomization is an explicit
+  planning assumption. Duration is the slowest-filling arm, with shared control counted once, then whole weeks.
+- Integer allocation is `n_control = n`, `n_treatment = ceil(r * n)`. The search brackets by doubling and bisects, and
+  relies on power not decreasing in `n`; the tests compare each result with `statsmodels` and scan 40 sizes below it.
+  In `power_proportions_2indep` sample 1 is the treatment arm (`nobs1 = n_treatment`, `ratio = n_control / n_treatment`);
+  a test shows the swapped mapping gives a different power, so the mapping is verified, not assumed.
+- Verification worked in the agreed order: the new regression and affected module after each change (67 power tests,
+  then 42 design tests), dependent integration tests after the block, and the full suite once at the end. The 42 design
+  tests all passed on the first run, so I mutated six behaviours to check that the tests can fail (no sign reversal,
+  alpha not divided, fastest arm instead of slowest, percentage points as fractions, baseline from all traffic, one
+  tail of power). Each mutation was caught by a named test.
+- Mistakes of mine caught on the way: a validation test used `alpha=0.05, power=0.01, n_comparisons=10`, which is
+  valid because power only has to exceed alpha per comparison (0.005); a test read `model_fields` from an instance
+  (deprecated in pydantic 2.11); a worked-values table in the docs was garbled and was rebuilt from the real outputs;
+  and the first summary sentence had nested parentheses and read "2 day(s), 7 days".
+- Monte Carlo (`tests/calibration/run_power_mc.py`, 2,000,000 replications per configuration, seeded, separate from the
+  fast suite; a two-test smoke check is in the suite): where the approximation is flagged reliable, null rejection is
+  4.99%-5.01% at alpha 0.05, the family-wise rate with several arms is 4.63% (two arms) and 4.46% (three arms), and
+  simulated power is 80.02%-80.16% against 80% (89.99% against 90%). The sparse case (min expected count 1.1) is
+  flagged unreliable and does behave differently: null rejection 5.21% and power 86.2% against the planned 80%.
+- Not done, by design: no experiment for `no_candidates` or `not_localized` (returns `needs_input`), no factorial
+  design for interacting releases, no visitor-level randomization. No MCP exposure (Task 7).
+- Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.
+
+### Task 6 review round 1 (PR #6, review supplied by the user)
+
+- Seven findings, each reproduced on `08a79bd` before any change (17 of the 20 new regression tests failed on it; the
+  other three are controls): a focal-only dataset gave "0 usable post-period days" because the panel's `usable` flag
+  needs comparison sessions; Hero, rejected at lag 0 but `inconclusive` at lag 1, was dropped from the options; targets
+  of -0.600 and +0.601 pp shared one sign and the positive arm had 66.4% power; the hypothesis said a null result would
+  mean no change; `power_analysis(.01, 1.8, allocation_ratio=.5)` called a design reliable with 6.31 expected treatment
+  successes under the all-baseline null; `power_analysis(.58, 41.5, power=.17, allocation_ratio=.09)` returned 45/5 where
+  34/4 already reaches the target; and `power_analysis(.03, .00008)` was rejected as above 10^12 although it needs about
+  7.1 x 10^11 (doubling jumped from 2^39 to 2^40).
+- Fixes: the panel has a `focal_usable` column and the design uses it (additive; `usable` is unchanged). A candidate is
+  open if it is not rejected at some evaluated lag; a lag-limited arm is sized at that onset and says so, and the default
+  stays two-arm. Each arm is sized for its own target, the neediest arm sets `n`, and the sparse regime where no common
+  `n` suits every arm returns `needs_input`. The wording says "did not detect ... does not show that the rollback has no
+  effect" and points to an interval or an equivalence assessment. The sparse diagnostic includes the all-baseline null
+  cells. Minimality is checked exhaustively for every smaller `n` up to 1,000,000 (`minimality = "exhaustive"`) and above
+  that is a bisection that assumes monotonicity (`"assumed_monotone"`, stated in the assumptions). The cap is tested
+  itself before giving up.
+- Three tests of mine encoded the reviewed behaviour (Hero never offered, the smallest magnitude sizing every arm,
+  `each_candidate` refused for the reference case). They were updated to the corrected contract, not deleted.
+- The Monte Carlo table is unchanged (identical output at 2,000,000 replications), and the reference design is still
+  10,216 sessions per arm, 2 traffic days, 7 days rounded.
+- Mutation checks: six mutations of the fixes (control required again, lag-limited candidates dropped, one shared target,
+  null cell ignored, no exhaustive scan, cap tested after the overshoot) were each caught by a named review test.
+- Verification order: the new regressions and affected modules after each change, then the full suite once at the end.
+
+### Task 6 review round 2 (PR #6): wording of the alternative note
+
+- `alternative_note` hard-coded "not at lag 1" and "a one-day delay", which was wrong when Checkout is declared at lag 1
+  and open at lag 0 (reproduced with `lag_days={Checkout: 1}`: the note said Checkout was not rejected at lag 1 while
+  the arm metadata correctly said lag 0). The note now quotes each arm's own `hypothesis_limit`, and that text names the
+  actual lag ("immediately (lag 0)" or "with a 1-day delay (lag 1)"). The unsized-alternative path uses the same text.
+- A wording-only change: verified with the focused review and design tests (65 passed) and Ruff; the full suite was not rerun.
