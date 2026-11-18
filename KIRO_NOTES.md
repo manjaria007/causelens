@@ -384,3 +384,50 @@ For each task, record:
   the arm metadata correctly said lag 0). The note now quotes each arm's own `hypothesis_limit`, and that text names the
   actual lag ("immediately (lag 0)" or "with a 1-day delay (lag 1)"). The unsized-alternative path uses the same text.
 - A wording-only change: verified with the focused review and design tests (65 passed) and Ruff; the full suite was not rerun.
+
+## Task 7: MCP server (branch `task-7-mcp-server`)
+
+- Built from `main` at `1977a36` as a thin, read-only adapter in `causelens/mcp/` (`datasets.py`, `models.py`, `tools.py`,
+  `server.py`, `__main__.py`). `causelens/analytics/`, the simulator, `data/` and steering are unchanged (`git diff
+  --stat main` on those paths is empty). Documentation: `docs/mcp-server.md`, with Kiro examples in `docs/mcp/`.
+- The installed SDK is `mcp` 2.3 (`FastMCP` is now `MCPServer`, and the client API differs), while `requirements.txt` said
+  `mcp>=1.20`. The code targets 2.x, so the pin is now `mcp>=2.3,<3`.
+- Decisions:
+  - A tool takes `dataset_id` (a registry of configured local files; no path ever comes from the caller) and returns the
+    analytics result model unchanged, so output schemas are generated from the analytics models and `structuredContent`
+    equals `model_dump(mode="json")` of the direct call. `power_analysis` takes no dataset.
+  - Prior results (`quality`, `change_point`, `decomposition`, `candidate_testing`, `did`) are typed model arguments.
+  - `project_impact` and `design_experiment` rebuild their population from `dataset_id`, `focal`, `comparison`,
+    `quality`, `apply_exclusions` and refuse a prior result that does not match it (excluded dates, usable days, sessions;
+    or different exclusions). `test_candidates` and `test_event_scope` refuse a decomposition for different windows. These
+    checks only reject; no number is changed.
+  - Insufficient-data results are ordinary results. Invalid arguments are tool errors with a clear message and no
+    traceback or server path.
+  - The tool set is the design's eleven tools plus `test_candidates`, `match_event_candidates` and `list_datasets`. The
+    helpers that are not tools in the design are not exposed.
+  - Every input schema is `additionalProperties: false`. The SDK ignores unknown arguments, so tools are registered while
+    the SDK's argument-model base forbids extras and then restored. That uses an SDK internal; a test checks it does not
+    leak and fails loudly if the SDK changes.
+  - No caching: each call reads and validates the files (about 45 ms), so a read-only server never serves stale data.
+  - `ground_truth*` can never be configured as a dataset file (rejected at startup), and nothing else reads it.
+- Mistakes of mine caught by my own tests: an awkward annotation expression for `date` (replaced by an import); a
+  missing-file error that embedded the server's absolute path (now file names only); the first draft of the HTTP test file
+  had placeholder lines, a nonexistent attribute and a junk assertion, cleaned before its first run; the contract test
+  found `check_data_quality` calls its argument `params` where every other tool says `detector_params` (kept the
+  consistent name, made the test's mapping explicit).
+- All 108 HTTP tests passed on their first complete run, so I mutated the adapter thirteen ways to see whether they can
+  fail. Eleven were caught at once. Two were not: `apply_exclusions` ignored by `check_pre_trends`, and `comparison`
+  ignored by `project_impact`, because my cases used the defaults. Both now have dedicated tests (a lenient quality report,
+  `apply_exclusions=false` and an explicit comparison, each required to match the direct call and to differ from the
+  default), and all thirteen mutations are caught.
+- Results: `.venv/bin/python -m pytest -q` passed (915 tests, 301 s) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP tests are 145 (HTTP with the official client, real stdio and HTTP processes, configuration). Over HTTP on the
+  reference data the slowest call is 573 ms (`test_event_scope`), a cold connection plus `test_candidates` is 645 ms, and
+  every tool is asserted under 2 s with loading and serialization included.
+- Read-only, answer key, network: an audit hook records every file open and socket connect during all tools. `ground_truth.json`
+  (in the same directory as the data) is never opened, nothing under the data directory is opened for writing, file hashes and
+  modification times are unchanged, and the only connections are to loopback.
+- Not verified: that Kiro itself launches or connects to the server from the example configs (they follow Kiro's documented
+  format and are tested for valid JSON and real flags). Automatic execution of the Stop hook is still unverified.
+- Known costs: `tools/list` is about 270 KB of schema (typed prior results), and `decompose_change` returns about 164 KB.
+  There is no authentication on the HTTP transport (loopback by default). Task 8 is not started.

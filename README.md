@@ -45,7 +45,7 @@ python -m causelens.sim.generate --seed 7 --out data/generated/seed-7
 
 - `causelens/sim/`: synthetic data generator
 - `causelens/analytics/`: planned deterministic analytical tools
-- `causelens/mcp/`: planned MCP server
+- `causelens/mcp/`: read-only MCP server over the analytics (see `docs/mcp-server.md`)
 - `causelens/agents/`: planned investigation orchestration
 - `causelens/ui/`: planned investigation console
 - `data/`: reference metadata and locally generated metrics

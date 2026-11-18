@@ -1,0 +1,10 @@
+{
+  "datasets": [
+    {
+      "id": "reference",
+      "metrics": "../../data/metrics_daily.csv",
+      "events": "../../data/events.csv",
+      "description": "Synthetic reference scenario, seed 42 (2026-08-01 to 2026-10-31)"
+    }
+  ]
+}

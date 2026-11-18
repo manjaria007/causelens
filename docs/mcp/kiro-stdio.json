@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "causelens": {
+      "command": "/projects/sandbox/causelens/.venv/bin/python",
+      "args": [
+        "-m", "causelens.mcp",
+        "--transport", "stdio",
+        "--dataset", "reference",
+        "/projects/sandbox/causelens/data/metrics_daily.csv",
+        "/projects/sandbox/causelens/data/events.csv"
+      ],
+      "env": {
+        "PYTHONPATH": "/projects/sandbox/causelens"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "list_datasets",
+        "check_data_quality",
+        "confirm_change",
+        "detect_change_point",
+        "match_event_candidates",
+        "decompose_change",
+        "test_candidates",
+        "test_event_scope",
+        "estimate_did",
+        "check_pre_trends",
+        "run_placebo",
+        "project_impact",
+        "power_analysis",
+        "design_experiment"
+      ]
+    }
+  }
+}
