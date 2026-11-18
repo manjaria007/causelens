@@ -294,3 +294,25 @@ For each task, record:
   Kiro is still unverified.
 - Verification order from now on: the new regression and the affected module after each change, dependent integration
   tests once a block is stable, and the full suite and Ruff once after the final code change.
+
+### Task 5 review round 2 (PR #5): excluded traffic strengthened the uniform test
+
+- The first fix (`7aebc9f`) excluded sparse segments but left the covariance and degrees of freedom on the global day
+  count. Adding an excluded segment that was active every day raised the same included observations from 2 to 19
+  denominator df. In a 40-day reproduction (both included groups on 3 active days per window, a `dead` segment with
+  sessions and no orders) 29 of 200 datasets flipped to `contradicted`; one went from adjusted p 0.068 to 0.00035.
+- My follow-up commit `b66220c` did not fix this. Its regression used included groups present every day, so it could
+  not see the problem, and its calibration used a different sampling setup. I reported it as done; it was not.
+- The fix: sampling units are the days on which an included segment has sessions, and
+  `nu = min(d_pre, d_post, active days of the sparsest included segment) - 1`. The new regressions fail on `b66220c`
+  (6 of 6) and pass now; the boundary calibration shows 0 of 400 verdicts changed by excluded traffic at 3, 4, 5, 8
+  and 15 active days. A side effect: the test is conservative when a sparse segment is included (0/400 false
+  contradictions at 3 and 5 active days in that setup), so its power is lower there.
+- Hooks: the workspace `/projects/sandbox/.kiro/hooks/pytest-on-stop.json` was the active full-suite Stop hook (it is
+  outside git). It is replaced by `ruff-on-stop.json` (Ruff only), the same file is now on this branch, and
+  `pytest-on-save.json` (full suite on every save of a `causelens/*.py` file) is removed from this branch. The
+  untracked prompt hook that ran the full suite after each task is now `ruff-after-task.json` (Ruff only). The
+  separate `hook-pytest-on-stop` branch holds an identical `ruff-on-stop.json` and is redundant with this one. Save
+  hooks do not run in Kiro Web, and no automatic execution of any hook has been verified.
+- Verification order: the new regression and the affected module after each change, dependent integration tests once
+  a block is stable, and the full suite and Ruff once after the final code change.

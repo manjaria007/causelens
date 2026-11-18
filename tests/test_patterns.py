@@ -305,3 +305,69 @@ def test_a_holm_p_value_of_zero_contradicts_the_pattern(monkeypatch):
     monkeypatch.setattr(mod, "holm_adjust", lambda ps: [0.0 for _ in ps])
     r = uniform_test(df, all_days(df), PRE_W, POST_W)
     assert r.status == "contradicted" and "p = 0" in r.detail
+
+
+# ------------------------------------------------------------------ excluded traffic must not strengthen the test
+
+
+PRE_40, POST_40 = (date(2026, 8, 1), date(2026, 8, 20)), (date(2026, 8, 21), date(2026, 9, 9))
+
+
+def three_active_day_frame(seed: int, *, with_excluded: bool, active: int = 3) -> pd.DataFrame:
+    """40 days. Included groups ``a`` and ``b`` are active on only ``active`` days in each window (the same days).
+    ``dead`` has sessions every day but no orders, so it is excluded, and it makes every one of the 40 days exist."""
+    rng = np.random.default_rng(seed)
+    active_days = set(rng.choice(20, active, replace=False)) | set(20 + rng.choice(20, active, replace=False))
+    rows = []
+    for i in range(40):
+        day = (pd.Timestamp("2026-08-01") + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
+        if i in active_days:
+            for dev in ("a", "b"):
+                s = int(rng.poisson(4000))
+                rows.append({"date": day, "device": dev, "browser": "chrome", "channel": "organic", "customer_type": "new",
+                             "sessions": s, "orders": int(rng.binomial(s, 0.04))})
+        if with_excluded:
+            rows.append({"date": day, "device": "dead", "browser": "chrome", "channel": "organic", "customer_type": "new",
+                         "sessions": 3000, "orders": 0})
+    return validate_metrics(pd.DataFrame(rows))
+
+
+def _device_partition(df: pd.DataFrame):
+    r = uniform_test(df, all_days(df), PRE_40, POST_40)
+    return r, next(p for p in r.partitions if p.dimension == "device")
+
+
+@pytest.mark.parametrize("seed", [63, 5, 11])
+def test_adding_excluded_traffic_cannot_change_the_test_of_unchanged_included_observations(seed):
+    r0, p0 = _device_partition(three_active_day_frame(seed, with_excluded=False))
+    r1, p1 = _device_partition(three_active_day_frame(seed, with_excluded=True))
+    assert set(p1.excluded) == {"dead"} and p1.included == p0.included == ["a", "b"]
+    assert (p1.df1, p1.df2) == (p0.df1, p0.df2)
+    assert p1.statistic == pytest.approx(p0.statistic, rel=1e-9)
+    assert p1.p_value == pytest.approx(p0.p_value, rel=1e-9) and p1.p_value_holm == pytest.approx(p0.p_value_holm, rel=1e-9)
+    assert r1.status == r0.status
+
+
+def test_three_active_days_give_two_denominator_degrees_of_freedom_whatever_the_global_day_count():
+    for with_excluded in (False, True):
+        _, p = _device_partition(three_active_day_frame(63, with_excluded=with_excluded))
+        assert p.df1 == 1 and p.df2 == 2  # 3 active days per window: nu = 3 - 1 = 2, p = 1 contrast
+
+
+def test_excluded_traffic_never_turns_not_contradicted_into_contradicted_over_many_datasets():
+    flips = 0
+    for seed in range(100):
+        a = uniform_test(f0 := three_active_day_frame(seed, with_excluded=False), all_days(f0), PRE_40, POST_40).status
+        b = uniform_test(f1 := three_active_day_frame(seed, with_excluded=True), all_days(f1), PRE_40, POST_40).status
+        flips += a != b
+    assert flips == 0, flips
+
+
+def test_null_false_contradiction_rate_at_the_three_day_boundary_with_excluded_traffic():
+    """Uniform truth, included groups at the 3-day minimum, a dead segment filling every global day."""
+    n = 150
+    bad = sum(
+        uniform_test(f := three_active_day_frame(s, with_excluded=True), all_days(f), PRE_40, POST_40).status == "contradicted"
+        for s in range(n)
+    )
+    assert bad / n <= 0.10, bad

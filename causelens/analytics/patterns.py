@@ -158,6 +158,13 @@ def uniform_test(
             parts.append(PartitionTest(dimension=dim, status="skipped", included=included, excluded=excluded,
                                        reason="fewer than 2 segments can support the test"))
             continue
+        # Only the included segments define the sampling units. Days on which none of them has sessions (they exist
+        # because excluded traffic is present) are dropped, and the degrees of freedom come from the sparsest included
+        # segment's active days, so adding excluded traffic can never change this test of the same included observations.
+        s0, o0, s1, o1 = (m[included] for m in (s0, o0, s1, o1))
+        keep0, keep1 = (s0 > 0).any(axis=1), (s1 > 0).any(axis=1)
+        s0, o0, s1, o1 = s0[keep0], o0[keep0], s1[keep1], o1[keep1]
+        active = min(int((s0 > 0).sum().min()), int((s1 > 0).sum().min()))  # active days of the sparsest included segment
         r0, c0, d0 = _ratio_cov(s0, o0, included)
         r1, c1, d1 = _ratio_cov(s1, o1, included)
         if scale == "relative":
@@ -172,10 +179,10 @@ def uniform_test(
         C[np.arange(k - 1), np.arange(1, k)] = 1.0
         v = C @ cov @ C.T
         p_dim = k - 1
-        nu = min(d0, d1) - 1
+        nu = min(d0, d1, active) - 1  # active <= d0, d1; it is smaller when included segments are sparse or misaligned
         if nu - p_dim + 1 < 1:
             parts.append(PartitionTest(dimension=dim, status="skipped", included=included, excluded=excluded,
-                                       reason=f"too few days ({min(d0, d1)}) to estimate {p_dim} contrasts"))
+                                       reason=f"too few days ({min(d0, d1, active)}) to estimate {p_dim} contrasts"))
             continue
         eig = np.linalg.eigvalsh(v)
         if not (eig.min() > 1e-12 * max(eig.max(), 1e-300)) or not np.isfinite(eig).all():

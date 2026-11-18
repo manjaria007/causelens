@@ -69,23 +69,42 @@ effect -0.6618. Projected overall change -0.206 pp, 95% CI [-0.234, -0.177] (pla
 Hero is `rejected` as the sole immediate explanation. Hero at lag 1 coincides with Checkout at lag 0, so that pair is
 unidentifiable from the data and the Hero lag-1 verdict is `inconclusive`.
 
-### Uniform pattern test with a sparse segment (null, 400 datasets per row)
+### Uniform pattern test with sparse segments (null, 400 datasets per row)
 
-`python tests/calibration/run_pattern_null.py --n 400`. Truth is uniform. Two dense segments plus one sparse segment
-seen on `k` days in each window (4,000 sessions on each of those days). The sparse segment is excluded when it has
-fewer than 3 active days in a window.
+`python tests/calibration/run_pattern_null.py --n 400`. Truth is uniform in every row.
+
+**Sparsity of one segment.** Two dense segments plus a sparse segment seen on `k` days in each window. A segment with
+fewer than 3 active days (days with sessions) in a window is excluded with a reason.
 
 | active days of the sparse segment per window | falsely contradicted (95% Wilson) | sparse segment excluded |
 |---|---|---|
 | 0 (absent) | 16/400, 4.0% (2.5-6.4%) | 0/400 |
 | 1 | 12/400, 3.0% (1.7-5.2%) | 400/400 |
 | 2 | 15/400, 3.8% (2.3-6.1%) | 400/400 |
-| 3 (the minimum that is included) | 20/400, 5.0% (3.3-7.6%) | 0/400 |
-| 5 | 10/400, 2.5% (1.4-4.5%) | 0/400 |
+| 3 (the minimum that is included) | 0/400, 0.0% (0.0-1.0%) | 0/400 |
+| 5 | 0/400, 0.0% (0.0-1.0%) | 0/400 |
 | 10 | 10/400, 2.5% (1.4-4.5%) | 0/400 |
 
-Before the fix, one active day per window gave 37 false contradictions in 40 datasets. The attribution scenarios
-declare no pattern, so this fix does not change them and they were not rerun.
+Before the fix, one active day per window gave 37 false contradictions in 40 datasets. The test is conservative when a
+sparse segment is included (its few days set the degrees of freedom), so power to detect real heterogeneity is lower
+there; that is the price of not claiming more than 2 degrees of freedom from 3 days.
+
+**Excluded traffic must not strengthen the test.** The sampling units are the days on which an included segment has
+sessions, and the denominator degrees of freedom are `min(active days of the sparsest included segment, days) - 1`.
+Earlier, the day count came from all traffic, so adding an excluded segment that was active every day raised the
+degrees of freedom of the same included observations from 2 to 19 and flipped 29 of 200 verdicts to `contradicted`
+(adjusted p from 0.068 to 0.00035 in one case). Now both included groups have 3 to 15 active days per window, a
+40-day panel, and an excluded `dead` segment (sessions, no orders) fills every day:
+
+| active days of the included groups per window | falsely contradicted, included only | falsely contradicted, plus excluded traffic | verdict changed by excluded traffic |
+|---|---|---|---|
+| 3 | 1/400, 0.2% (0.0-1.4%) | 1/400, 0.2% (0.0-1.4%) | 0/400 |
+| 4 | 5/400, 1.2% (0.5-2.9%) | 5/400, 1.2% (0.5-2.9%) | 0/400 |
+| 5 | 8/400, 2.0% (1.0-3.9%) | 8/400, 2.0% (1.0-3.9%) | 0/400 |
+| 8 | 15/400, 3.8% (2.3-6.1%) | 15/400, 3.8% (2.3-6.1%) | 0/400 |
+| 15 | 12/400, 3.0% (1.7-5.2%) | 12/400, 3.0% (1.7-5.2%) | 0/400 |
+
+The attribution scenarios declare no pattern, so these fixes do not change them and they were not rerun.
 
 ### Full pipeline, 150 seeds per scenario
 
@@ -140,7 +159,8 @@ How to read it:
 Each case was reproduced first and has a regression test in `tests/test_review_regressions.py`.
 
 * Uniform test: a segment needs at least 3 active days (days with sessions) in each window, otherwise it is excluded
-  with a reason. A segment seen on one day per window has zero estimated variance and falsely rejected
+  with a reason. The sampling days and degrees of freedom come from the included segments only (see the calibration
+  section), so excluded traffic cannot strengthen the test. A segment seen on one day per window has zero estimated variance and falsely rejected
   uniformity in 37 of 40 datasets; the regression test now allows at most 5 of 40. A Holm p-value of exactly 0 now counts as a rejection.
 * DiD, pre-trend and placebo regressions report `not estimable` when residuals are at rounding level (data fitted
   exactly, such as two groups that never change), instead of a spurious significant effect.
