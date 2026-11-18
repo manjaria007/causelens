@@ -30,15 +30,18 @@ written by other tools to Kiro.
 
 ## Hooks
 
-- **Replacement hook added:** `.kiro/hooks/pytest-on-stop.json` (trigger `Stop`, command hook,
-  timeout 120 s). It runs `.venv/bin/python -m pytest -q` from the repository root (it changes
-  directory itself, because the Web workspace root is the parent of the repository) and appends a
-  timestamped start/end record with the pytest exit code to `.pytest_cache/stop-hook-runs.log`
-  (git-ignored). It always exits 0 so it can never block the agent from stopping.
+- **Stop hook now runs Ruff only:** `.kiro/hooks/ruff-on-stop.json` (renamed from `pytest-on-stop.json`;
+  trigger `Stop`, command hook, timeout 60 s). It runs `.venv/bin/python -m ruff check causelens tests` from the
+  repository root (it changes directory itself, because the Web workspace root is the parent of the repository)
+  and appends a timestamped start/end record with the Ruff exit code to `.pytest_cache/stop-hook-runs.log`
+  (git-ignored). It always exits 0 so it can never block the agent from stopping. The full pytest suite takes
+  about 160 s, longer than a Stop hook should take, so tests are run explicitly instead: the affected module and
+  its regression first, dependent integration tests once a block is stable, and the full suite once after the final
+  code change.
 - **Execution NOT verified.** Kiro reported that the hook becomes active on the *next session
   start*, and a `Stop` hook fires when the agent finishes a turn, so no automatic execution record
-  could exist in the session that created it. The only run so far was a manual dry run of the
-  same command against a scratch log (215 passed in 62 s). That is not an execution record and is
+  could exist in the session that created it. The only run so far was a manual run of the
+  hook's command from its JSON (Ruff: all checks passed, 0.06 s, exit 0). That is not an execution record and is
   not counted as verification.
 - **`pytest-on-save` is still present** and has not been removed, because the replacement is
   unverified. Its own activation was never verified either: no hook output appeared across many
