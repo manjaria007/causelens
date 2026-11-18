@@ -7,7 +7,8 @@ written by other tools to Kiro.
 
 - Repository setup and the synthetic data generator were prepared with other tools before the Kiro build; Kiro implementation began with Task 2.
 - Codex prepared this setup branch: documentation, generated-data/cache ignores,
-  removal of the src placeholder, and the pytest-on-save hook configuration.
+  removal of the src placeholder, and the pytest-on-save hook configuration (since removed; see
+  "Automation and verification (current)").
 - Existing steering, requirements, design, task checklist, simulator, events, and
   ground truth are preserved. Tasks 2 through 6 remain unimplemented.
 - The hook uses the current Kiro IDE 1.x / CLI V3 schema documented at
@@ -33,7 +34,8 @@ written by other tools to Kiro.
 Start each parent task in .kiro/specs/metric-investigation/tasks.md, complete its
 subtasks, review the diff, run pytest, and fix failures before moving on. Keep
 analytical code in causelens/analytics/. Commit and push each completed task
-separately. Stop after Task 6 for review before starting the MCP server or agents.
+separately, and stop after each parent task for review before starting the next.
+The verification order is in "Automation and verification (current)" below.
 
 For each task, record:
 
@@ -42,6 +44,49 @@ For each task, record:
 - Any specification issue and how it was resolved.
 - Commands and actual test results.
 - The commit containing the completed task.
+
+## Automation and verification (current)
+
+This section is the current state. Earlier entries describe what was true when they were written, including a
+full-suite Stop hook and a pytest-on-save hook, and a "Hooks section on the `hook-pytest-on-stop` branch".
+
+- **Automation is Ruff only.** `.kiro/hooks/ruff-on-stop.json` (tracked on `main`) runs
+  `.venv/bin/python -m ruff check causelens tests` on the `Stop` trigger, resolves the active git checkout first (falling
+  back to `/projects/sandbox/causelens`), appends a record to `.pytest_cache/stop-hook-runs.log`, and always exits 0. It
+  runs no tests: the full suite takes 3 to 6 minutes. The workspace copy that a Web session loads,
+  `/projects/sandbox/.kiro/hooks/ruff-on-stop.json`, is outside git and identical to it. The old full-suite
+  `pytest-on-stop.json` and the pytest-on-save hook were removed. `hook-pytest-on-stop` is a superseded branch holding the
+  same file. `ruff-after-task.json` (a prompt hook that runs Ruff after a spec task and checks that the full suite ran
+  once) exists only as an untracked local file.
+- **Activation is unverified.** No automatic execution of any hook has been observed in Kiro. File-save triggers do not
+  run in Kiro Web. Running a hook's command by hand (I did, in the repository, the workspace root and a temporary worktree)
+  shows the command works; it does not show that Kiro fires it. Every test result in these notes comes from running the
+  commands directly.
+- **Verification order.** (1) After each change, the new regression and the affected module's tests. (2) After a related
+  block is stable, the dependent integration tests. (3) After the final code change, the full suite and Ruff, once
+  (`.venv/bin/python -m pytest -q` and `.venv/bin/python -m ruff check causelens tests`). A wording-only change needs the
+  focused tests and Ruff, not another full run, and a note says so when the full suite was not rerun. Slow statistical
+  calibration (hundreds of simulated datasets) is run only when a change touches statistical behaviour, in separate
+  scripts rather than in the fast suite.
+
+## Reference result, as reported
+
+Wording to keep consistent across the README, the docs and any write-up. Numbers and intervals are in
+`docs/candidate-testing.md` and `docs/experiment-design.md`; this does not repeat them.
+
+- Checkout v4.2 is `supported` with evidence strength **`moderate`**, **conditional on lag 0** (the effect begins on the
+  event date). It is not `strong` because attribution is ambiguous: Hero at lag 1 and Checkout at lag 0 begin on the same
+  date, so the data cannot separate them (a strong base strength is capped at `moderate`).
+- Hero is `rejected` only as the sole immediate explanation (lag 0). At lag 1 it is `inconclusive`, not excluded, and it
+  stays a lag-limited option in the experiment design.
+- The estimate is a differential effect and assumes the comparison traffic was unaffected. It is not a claim about the
+  sole historical cause.
+- Recovery rates and limits come from 150 simulated seeds per scenario (the simulator's constants overridden in memory): planted
+  cause 83%, swapped cause 92%; a one-day-delayed true cause is identical data and is named wrongly (as Checkout, flagged
+  ambiguous) in 83% of runs; staged effects are wrong without an ambiguity flag in 29%; a -12% effect is recovered in 27%
+  and at -6% 59% of runs stop at the confirm-change step. These limits are part of the result and should be stated with it.
+- Not yet true, so not to be claimed: an end-to-end investigation, the Requirement 10.2 grading (Task 9), and any statement
+  that Kiro has fired a hook.
 
 ## Review points for Kiro
 
