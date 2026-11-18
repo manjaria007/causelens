@@ -316,3 +316,37 @@ For each task, record:
   hooks do not run in Kiro Web, and no automatic execution of any hook has been verified.
 - Verification order: the new regression and the affected module after each change, dependent integration tests once
   a block is stable, and the full suite and Ruff once after the final code change.
+
+## Task 6: experiment design (branch `task-6-experiment-design`)
+
+- Contract agreed before coding, with the user's corrections: `baseline` is a fraction and `mde_pp` a signed
+  percentage-point change (`target_rate = baseline + mde_pp / 100`); power is reported as "achieved power under the
+  normal approximation", not exact power; alpha, power, allocation and the resulting rates are validated.
+  A user-declared business target is preferred. The nearest-zero interval bound is only a clearly labelled provisional
+  planning heuristic that does not correct winner's curse, with its sign reversed for a rollback; with no usable
+  estimate the result is `needs_input`. The baseline is the usable post-period focal conversion with its window and
+  counts. The default is a two-arm rollback of the leading candidate (current contribution, other releases fixed, not the
+  sole historical cause), with a shared-control multi-arm option and alpha divided by the number of comparisons, power
+  labelled per comparison. Guardrails are labelled by what can be measured. Session randomization is an explicit
+  planning assumption. Duration is the slowest-filling arm, with shared control counted once, then whole weeks.
+- Integer allocation is `n_control = n`, `n_treatment = ceil(r * n)`. The search brackets by doubling and bisects, and
+  relies on power not decreasing in `n`; the tests compare each result with `statsmodels` and scan 40 sizes below it.
+  In `power_proportions_2indep` sample 1 is the treatment arm (`nobs1 = n_treatment`, `ratio = n_control / n_treatment`);
+  a test shows the swapped mapping gives a different power, so the mapping is verified, not assumed.
+- Verification worked in the agreed order: the new regression and affected module after each change (67 power tests,
+  then 42 design tests), dependent integration tests after the block, and the full suite once at the end. The 42 design
+  tests all passed on the first run, so I mutated six behaviours to check that the tests can fail (no sign reversal,
+  alpha not divided, fastest arm instead of slowest, percentage points as fractions, baseline from all traffic, one
+  tail of power). Each mutation was caught by a named test.
+- Mistakes of mine caught on the way: a validation test used `alpha=0.05, power=0.01, n_comparisons=10`, which is
+  valid because power only has to exceed alpha per comparison (0.005); a test read `model_fields` from an instance
+  (deprecated in pydantic 2.11); a worked-values table in the docs was garbled and was rebuilt from the real outputs;
+  and the first summary sentence had nested parentheses and read "2 day(s), 7 days".
+- Monte Carlo (`tests/calibration/run_power_mc.py`, 2,000,000 replications per configuration, seeded, separate from the
+  fast suite; a two-test smoke check is in the suite): where the approximation is flagged reliable, null rejection is
+  4.99%-5.01% at alpha 0.05, the family-wise rate with several arms is 4.63% (two arms) and 4.46% (three arms), and
+  simulated power is 80.02%-80.16% against 80% (89.99% against 90%). The sparse case (min expected count 1.1) is
+  flagged unreliable and does behave differently: null rejection 5.21% and power 86.2% against the planned 80%.
+- Not done, by design: no experiment for `no_candidates` or `not_localized` (returns `needs_input`), no factorial
+  design for interacting releases, no visitor-level randomization. No MCP exposure (Task 7).
+- Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.
