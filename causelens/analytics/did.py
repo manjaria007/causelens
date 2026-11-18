@@ -63,7 +63,8 @@ class Panel(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     daily: pd.DataFrame = Field(
-        description="Index: every date in the data. Columns s_f, o_f, s_c, o_c (counts), s_all (sessions of the whole population, including traffic in neither group), usable (bool), "
+        description="Index: every date in the data. Columns s_f, o_f, s_c, o_c (counts), s_all (sessions of the whole population, including traffic in neither group), usable (bool: not excluded, and both groups have sessions), focal_usable (bool: not excluded, and the focal "
+        "segment has sessions), "
         "rate_f, rate_c (fractions) and diff_pp (focal minus comparison, pp); NaN where not usable."
     )
     focal: list[dict[str, str]]
@@ -144,6 +145,8 @@ def build_panel(
     daily.index.name = "date"
     status_ok = (prepared.daily["status"] == "ok").to_numpy()
     daily["usable"] = status_ok & (daily["s_f"] > 0).to_numpy() & (daily["s_c"] > 0).to_numpy()
+    # Planning an experiment needs the focal traffic only, not an observational comparison group.
+    daily["focal_usable"] = status_ok & (daily["s_f"] > 0).to_numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         daily["rate_f"] = (daily["o_f"] / daily["s_f"]).where(daily["usable"])
         daily["rate_c"] = (daily["o_c"] / daily["s_c"]).where(daily["usable"])

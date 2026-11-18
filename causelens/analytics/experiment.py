@@ -29,7 +29,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
-from scipy import stats
+from scipy import special, stats
 
 from causelens.analytics.candidates import CandidateTestingResult, CandidateVerdict
 from causelens.analytics.confirm import Interval
@@ -41,6 +41,7 @@ MIN_EXPECTED_COUNT = 10.0
 MIN_BASELINE_DAYS = 7
 MIN_ALLOCATION_RATIO, MAX_ALLOCATION_RATIO = 0.01, 100.0
 MAX_SAMPLE_SIZE = 10**12
+EXHAUSTIVE_SCAN_LIMIT = 1_000_000  # check every smaller n up to here; beyond it, power is assumed monotone in n
 
 Window = tuple[Date | str, Date | str]
 
@@ -109,18 +110,29 @@ def normal_approx_power(
     return _power(p0, p1, nc, nt, a / k)
 
 
-def _power(p0: float, p1: float, nc: float, nt: float, alpha_per: float) -> float:
+def _power_vec(p0: float, p1: float, nc: np.ndarray, nt: np.ndarray, alpha_per: float) -> np.ndarray:
+    """Achieved power under the normal approximation for arrays of integer arm sizes (both tails)."""
     d = abs(p1 - p0)
     z = float(stats.norm.isf(alpha_per / 2.0))
     pbar = (nc * p0 + nt * p1) / (nc + nt)
-    se0 = math.sqrt(pbar * (1.0 - pbar) * (1.0 / nc + 1.0 / nt))
-    se1 = math.sqrt(p0 * (1.0 - p0) / nc + p1 * (1.0 - p1) / nt)
-    return float(stats.norm.cdf((d - z * se0) / se1) + stats.norm.cdf((-d - z * se0) / se1))
+    se0 = np.sqrt(pbar * (1.0 - pbar) * (1.0 / nc + 1.0 / nt))
+    se1 = np.sqrt(p0 * (1.0 - p0) / nc + p1 * (1.0 - p1) / nt)
+    return special.ndtr((d - z * se0) / se1) + special.ndtr((-d - z * se0) / se1)
+
+
+def _power(p0: float, p1: float, nc: float, nt: float, alpha_per: float) -> float:
+    return float(_power_vec(p0, p1, np.asarray([float(nc)]), np.asarray([float(nt)]), alpha_per)[0])
 
 
 def _min_expected_count(p0: float, p1: float, nc: int, nt: int) -> float:
+    """Smallest expected cell count the z-test relies on: both arms under the all-baseline null (the cells the pooled
+    variance and the null distribution use), under the pooled null estimate, and under the alternative."""
     pbar = (nc * p0 + nt * p1) / (nc + nt)
-    return float(min(nc * p0, nc * (1 - p0), nt * p1, nt * (1 - p1), nc * pbar, nc * (1 - pbar), nt * pbar, nt * (1 - pbar)))
+    cells = []
+    for n, rates in ((nc, (p0, pbar, p0)), (nt, (p0, pbar, p1))):  # control: baseline; treatment: null, pooled, alternative
+        for q in rates:
+            cells += [n * q, n * (1.0 - q)]
+    return float(min(cells))
 
 
 class PowerResult(BaseModel):
@@ -142,6 +154,10 @@ class PowerResult(BaseModel):
     previous_pair_power: float | None = Field(description="Same quantity at n_control - 1 (below the target by construction).")
     min_expected_count: float
     approximation_reliable: bool
+    minimality: Literal["exhaustive", "assumed_monotone"] = Field(
+        description="'exhaustive': every smaller n was checked, so n is the smallest that reaches the target. "
+        "'assumed_monotone': n is large, and power is assumed not to fall as n grows (a bisection)."
+    )
     warnings: list[str]
     assumptions: list[str]
     method: str = "two-sided pooled two-proportion z-test; normal approximation"
@@ -171,14 +187,15 @@ def power_analysis(
     def reaches(n: int) -> bool:
         return _power(p0, p1, n, nt_of(n), a_per) >= pw
 
+    # Bracket by doubling, testing the cap itself before giving up (a doubling step can overshoot it).
     hi = 2
     while not reaches(hi):
-        hi *= 2
-        if hi > MAX_SAMPLE_SIZE:
+        if hi >= MAX_SAMPLE_SIZE:
             raise ValueError(
                 f"the required sample size exceeds {MAX_SAMPLE_SIZE:,} per arm; the effect is too small to design for"
             )
-    lo = 1  # infeasible or the minimum; refine below
+        hi = min(hi * 2, MAX_SAMPLE_SIZE)
+    lo = 1
     if reaches(lo):
         hi = lo
     else:
@@ -189,6 +206,15 @@ def power_analysis(
             else:
                 lo = mid
     n = hi
+    minimality: Literal["exhaustive", "assumed_monotone"] = "assumed_monotone"
+    if n <= EXHAUSTIVE_SCAN_LIMIT:
+        # Power is not monotone in n where counts are tiny (the integer allocation and the pooled variance both move),
+        # so a bisection can stop above the smallest feasible pair. Scan every n up to the bisection's answer.
+        ns = np.arange(1, n + 1, dtype=float)
+        nts = np.maximum(1.0, np.ceil(r * ns - 1e-12))
+        ok = np.flatnonzero(_power_vec(p0, p1, ns, nts, a_per) >= pw)
+        n = int(ok[0]) + 1 if ok.size else n
+        minimality = "exhaustive"
     nt = nt_of(n)
     achieved = _power(p0, p1, n, nt, a_per)
     prev = _power(p0, p1, n - 1, nt_of(n - 1), a_per) if n > 1 else None
@@ -203,9 +229,14 @@ def power_analysis(
     return PowerResult(
         baseline=p0, mde_pp=d_pp, target_rate=p1, alpha=a, n_comparisons=k, alpha_per_comparison=a_per, target_power=pw,
         allocation_ratio=r, n_control=n, n_treatment=nt, n_total_per_comparison=n + nt, achieved_power=achieved,
-        previous_pair_power=prev, min_expected_count=min_count, approximation_reliable=reliable, warnings=warnings,
+        previous_pair_power=prev, min_expected_count=min_count, approximation_reliable=reliable, minimality=minimality, warnings=warnings,
         assumptions=[
             "Sessions are independent and identically distributed within an arm, with no carryover between sessions.",
+            (
+                "n is the smallest sample size that reaches the target (every smaller size was checked)."
+                if minimality == "exhaustive"
+                else "n is found by bisection and assumes that power does not fall as n grows; it is not checked for every smaller n."
+            ),
             f"The test is two-sided at alpha = {a:g}" + (f" divided by {k} comparisons ({a_per:g} each, Bonferroni)" if k > 1 else "") + ".",
             "Power is per comparison" + (", not the probability that every comparison is detected." if k > 1 else "."),
             "The effect is the planning value; the true effect is unknown, and a smaller one needs a larger sample.",
@@ -249,10 +280,21 @@ class Guardrail(BaseModel):
     reference: dict[str, float | int] | None = None
 
 
+class ArmMde(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event: str
+    mde_pp: float = Field(description="Signed percentage-point change this arm is sized to detect.")
+    target_rate: float
+    onset_date: Date = Field(description="The onset the arm's estimate refers to (the first lag at which the candidate is still open).")
+    observed_effect: Interval | None = None
+
+
 class MdeInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    mde_pp: float
+    mde_pp: float = Field(description="The target of the arm that needs the most sessions, and so sets the sample size.")
+    per_arm: list[ArmMde] = Field(default_factory=list)
     source: Literal["user_declared", "provisional_planning_heuristic"]
     label: str
     observed_effect: Interval | None = Field(None, description="The differential effect the heuristic started from.")
@@ -269,6 +311,10 @@ class ArmPlan(BaseModel):
     n_sessions: int
     allocation_share: float
     days_to_fill: float
+    mde_pp: float | None = Field(None, description="Rollback arms: the signed change this arm is sized for.")
+    target_rate: float | None = None
+    achieved_power: float | None = Field(None, description=f"Rollback arms: {ACHIEVED_POWER_LABEL}, per comparison, at the planned sizes.")
+    hypothesis_limit: str | None = Field(None, description="Set when the candidate was rejected at its declared lag but is kept as a lag-limited alternative.")
 
 
 class ExperimentPlan(BaseModel):
@@ -276,7 +322,9 @@ class ExperimentPlan(BaseModel):
 
     arms: list[ArmPlan]
     n_comparisons: int
-    power: PowerResult
+    power: PowerResult = Field(description="The binding arm's power result: the arm needing the most sessions sets the sizes.")
+    binding_arm: str
+    warnings: list[str] = Field(default_factory=list)
     slowest_arm: str
     duration_days: int = Field(description="ceil of the slowest-filling arm's days.")
     duration_weeks: int
@@ -325,9 +373,34 @@ def _window(w: Window) -> tuple[Date, Date]:
     return a, b
 
 
-def _effect_for(c: CandidateVerdict, panel: Panel) -> Interval | None:
-    """The candidate's differential effect: from Task 5 if it was computed, otherwise a default HC1 DiD at its onset."""
-    d = c.differential_effect if c.differential_effect is not None else did_on_panel(panel, c.onset_date)
+def _open_onset(c: CandidateVerdict) -> Date | None:
+    """The onset at which a candidate is still a possible contributor: its declared one unless rejected there, else the
+    first evaluated lag where it was not rejected. ``None`` when it was rejected at every evaluated lag."""
+    if c.verdict != "rejected":
+        return c.onset_date
+    for o in c.lag_sensitivity:
+        if o.verdict != "rejected":
+            return o.onset_date
+    return None
+
+
+def _limit_note(c: CandidateVerdict, onset: Date) -> str | None:
+    if c.verdict != "rejected":
+        return None
+    lag = next((o.lag_days for o in c.lag_sensitivity if o.onset_date == onset), None)
+    what = "the sole immediate explanation" if c.lag_days == 0 else f"the sole explanation at lag {c.lag_days}"
+    return (
+        f"hypothesis-limited: {c.event} was rejected as {what} but not at lag {lag} (onset {onset}); this arm tests its current "
+        f"contribution only if it acts with that delay"
+    )
+
+
+def _effect_for(c: CandidateVerdict, panel: Panel, onset: Date) -> Interval | None:
+    """The candidate's differential effect at ``onset``: from Task 5 if it was computed there, otherwise a default HC1 DiD.
+
+    Needs an observational comparison group; without one the result is ``None`` and the caller asks for a declared target."""
+    stored = c.differential_effect if onset == c.onset_date else None
+    d = stored if stored is not None else did_on_panel(panel, onset)
     return d.effect_pp if d.status == "ok" and d.effect_pp is not None else None
 
 
@@ -340,39 +413,58 @@ def _heuristic_mde(effect: Interval) -> float | None:
     return None
 
 
-def _size_mde(cands: Sequence[CandidateVerdict], panel: Panel) -> tuple[float, Interval, str] | str:
-    """Heuristic MDE over the arms: the smallest magnitude wins so every arm is powered; a string explains a failure."""
-    found: list[tuple[float, Interval, str]] = []
-    for c in cands:
-        eff = _effect_for(c, panel)
-        if eff is None:
-            return f"no usable estimate to size the experiment for {c.event}: no differential-effect estimate is available"
-        h = _heuristic_mde(eff)
-        if h is None:
-            return (f"no usable estimate to size the experiment for {c.event}: its differential-effect interval "
-                    f"({eff.lower:+.3f} to {eff.upper:+.3f} pp) includes 0")
-        found.append((h, eff, c.event))
-    return min(found, key=lambda t: abs(t[0]))
+def _arm_mdes(arms: Sequence[tuple[CandidateVerdict, Date]], panel: Panel, declared: float | None, baseline: float) -> list[ArmMde] | str:
+    """One target per arm: the declared one for every arm, or each arm's own heuristic. A string explains a failure."""
+    out: list[ArmMde] = []
+    for c, onset in arms:
+        eff = None if declared is not None else _effect_for(c, panel, onset)
+        if declared is not None:
+            h = declared
+        else:
+            if eff is None:
+                return f"no usable estimate to size the experiment for {c.event}: no differential-effect estimate is available"
+            h = _heuristic_mde(eff)
+            if h is None:
+                return (f"no usable estimate to size the experiment for {c.event}: its differential-effect interval "
+                        f"({eff.lower:+.3f} to {eff.upper:+.3f} pp) includes 0")
+        out.append(ArmMde(event=c.event, mde_pp=h, target_rate=baseline + h / 100.0, onset_date=onset, observed_effect=eff))
+    return out
 
 
 def _plan(
-    arms: list[tuple[str, str]], baseline: float, mde_pp: float, daily_sessions: float, *, alpha: float, power: float, allocation_ratio: float
+    arms: Sequence[tuple[ArmMde, str | None]], baseline: float, daily_sessions: float, *, alpha: float, power: float, allocation_ratio: float
 ) -> ExperimentPlan:
+    """Shared control, one rollback arm per entry, each sized for its own target; the neediest arm sets the sizes."""
     k = len(arms)
-    res = power_analysis(baseline, mde_pp, alpha=alpha, power=power, allocation_ratio=allocation_ratio, n_comparisons=k)
+    per = [power_analysis(baseline, a.mde_pp, alpha=alpha, power=power, allocation_ratio=allocation_ratio, n_comparisons=k) for a, _ in arms]
+    bind = max(range(k), key=lambda i: per[i].n_control)
+    res = per[bind]
+    nc, nt = res.n_control, res.n_treatment
+    achieved = [normal_approx_power(baseline, a.mde_pp, nc, nt, alpha=alpha, n_comparisons=k) for a, _ in arms]
+    short = [a.event for (a, _), x in zip(arms, achieved, strict=True) if x < power]
+    if short:
+        raise ValueError(
+            f"the arms cannot be sized jointly in this sparse regime ({', '.join(short)} would fall below the target power at "
+            f"{nc:,} control sessions); declare a single mde_pp"
+        )
+    warnings = list(res.warnings)
+    for (a, _), x in zip(arms, achieved, strict=True):
+        count = _min_expected_count(baseline, a.target_rate, nc, nt)
+        if count < MIN_EXPECTED_COUNT and a.event != arms[bind][0].event:
+            warnings.append(f"the normal approximation is unreliable for the {a.event} arm: its smallest expected count is {count:.1f} (< {MIN_EXPECTED_COUNT:g})")
     r = res.allocation_ratio
-    control_share = 1.0 / (1.0 + k * r)
-    treat_share = r / (1.0 + k * r)
-    plan_arms = [ArmPlan(name="control (current experience retained)", role="control", rollback_of=None, n_sessions=res.n_control,
-                         allocation_share=control_share, days_to_fill=res.n_control / (daily_sessions * control_share))]
-    for event, _ in arms:
-        plan_arms.append(ArmPlan(name=f"rollback of {event}", role="rollback", rollback_of=event, n_sessions=res.n_treatment,
-                                 allocation_share=treat_share, days_to_fill=res.n_treatment / (daily_sessions * treat_share)))
+    control_share, treat_share = 1.0 / (1.0 + k * r), r / (1.0 + k * r)
+    plan_arms = [ArmPlan(name="control (current experience retained)", role="control", rollback_of=None, n_sessions=nc,
+                         allocation_share=control_share, days_to_fill=nc / (daily_sessions * control_share))]
+    for (a, limit), x in zip(arms, achieved, strict=True):
+        plan_arms.append(ArmPlan(name=f"rollback of {a.event}", role="rollback", rollback_of=a.event, n_sessions=nt, allocation_share=treat_share,
+                                 days_to_fill=nt / (daily_sessions * treat_share), mde_pp=a.mde_pp, target_rate=a.target_rate,
+                                 achieved_power=x, hypothesis_limit=limit))
     slowest = max(plan_arms, key=lambda a: a.days_to_fill)
     days = max(1, math.ceil(slowest.days_to_fill - 1e-9))
     weeks = math.ceil(days / 7)
-    return ExperimentPlan(arms=plan_arms, n_comparisons=k, power=res, slowest_arm=slowest.name, duration_days=days,
-                          duration_weeks=weeks, duration_days_rounded_to_weeks=7 * weeks)
+    return ExperimentPlan(arms=plan_arms, n_comparisons=k, power=res, binding_arm=arms[bind][0].event, warnings=warnings,
+                          slowest_arm=slowest.name, duration_days=days, duration_weeks=weeks, duration_days_rounded_to_weeks=7 * weeks)
 
 
 def design_experiment(
@@ -420,32 +512,36 @@ def design_experiment(
         )
 
     # ---- which candidate(s) -------------------------------------------------------------
-    open_ = [c for c in candidate_testing.candidates if c.verdict != "rejected"]
+    by_name = {c.event: c for c in candidate_testing.candidates}
+    open_onset = {c.event: o for c in candidate_testing.candidates if (o := _open_onset(c)) is not None}
+    open_ = [c for c in candidate_testing.candidates if c.event in open_onset]  # not rejected at some evaluated lag
+    live = [c for c in candidate_testing.candidates if c.verdict != "rejected"]
     if arms == "each_candidate":
         if len(open_) < 2:
-            raise ValueError("arms='each_candidate' needs at least two candidates that are not rejected")
+            raise ValueError("arms='each_candidate' needs at least two candidates that are not rejected at every evaluated lag")
         targets = open_
     elif target_candidate is not None:
-        targets = [next(c for c in candidate_testing.candidates if c.event == target_candidate)]
+        targets = [by_name[target_candidate]]
     elif candidate_testing.leading is not None:
-        targets = [next(c for c in candidate_testing.candidates if c.event == candidate_testing.leading)]
-    elif len(open_) == 1:
-        targets = open_
+        targets = [by_name[candidate_testing.leading]]
+    elif len(live) == 1:
+        targets = live
     else:
-        listed = ", ".join(c.event for c in open_) or "none (every candidate was rejected as the sole source)"
+        listed = ", ".join(c.event + ("" if c.verdict != "rejected" else " (lag-limited)") for c in open_) or "none (every candidate was rejected at every evaluated lag)"
         return _needs(
             f"no single candidate leads; open candidates: {listed}. Name one with target_candidate, or use arms='each_candidate'.",
             ["target_candidate"], focal=focal.label,
         )
+    arm_onsets = [(c, open_onset.get(c.event, c.onset_date)) for c in targets]
     lead = targets[0]
     strength = lead.evidence.strength if (len(targets) == 1 and lead.evidence is not None) else "insufficient"
     purpose: Literal["settle", "confirm"] = "confirm" if strength == "strong" else "settle"
 
-    # ---- baseline and traffic from the observed post period ------------------------------
+    # ---- baseline and traffic from the observed post period (focal traffic only: no control group is needed) --------
     panel = build_panel(metrics, focal.segments, events=events, quality=quality, apply_exclusions=apply_exclusions)
     d = panel.daily
     inside = (d.index >= pd.Timestamp(window[0])) & (d.index <= pd.Timestamp(window[1]))
-    use = d[inside & d["usable"].to_numpy(dtype=bool)]
+    use = d[inside & d["focal_usable"].to_numpy(dtype=bool)]
     excluded = [x for x in panel.excluded_dates if window[0] <= x <= window[1]]
     base_kw = {"focal": focal.label, "evidence_strength": strength, "target": [c.event for c in targets]}
     if len(use) < MIN_BASELINE_DAYS:
@@ -470,20 +566,27 @@ def design_experiment(
         assumption=f"traffic continues at the observed rate of {daily:,.0f} eligible sessions per day (mean of {len(use)} usable post-period days); all eligible sessions are enrolled",
     )
 
-    # ---- the minimum detectable effect ---------------------------------------------------
+    # ---- a target for every arm, then the plan ------------------------------------------------------------------
+    sized = _arm_mdes(arm_onsets, panel, declared, baseline_rate)
+    if isinstance(sized, str):
+        return _needs(sized + ". Declare a business target with mde_pp.", ["mde_pp"], baseline=baseline, traffic=traffic, **base_kw)
+    limits = {c.event: _limit_note(c, o) for c, o in arm_onsets}
+    try:
+        plan = _plan([(m, limits[m.event]) for m in sized], baseline_rate, daily, alpha=alpha, power=power, allocation_ratio=allocation_ratio)
+    except ValueError as exc:
+        return _needs(f"the sample-size calculation is not possible: {exc}", ["mde_pp"], baseline=baseline, traffic=traffic, **base_kw)
+    binding = next(m for m in sized if m.event == plan.binding_arm)
     if declared is not None:
         mde = MdeInfo(
-            mde_pp=declared, source="user_declared", label="user-declared business target", observed_effect=None, observed_for=None,
-            caveats=["Declared by the user; it is not derived from this data."],
+            mde_pp=binding.mde_pp, per_arm=sized, source="user_declared", label="user-declared business target", observed_effect=None,
+            observed_for=None, caveats=["Declared by the user and applied to every arm; it is not derived from this data."],
         )
     else:
-        sized = _size_mde(targets, panel)
-        if isinstance(sized, str):
-            return _needs(sized + ". Declare a business target with mde_pp.", ["mde_pp"], baseline=baseline, traffic=traffic, **base_kw)
-        h, eff, event = sized
+        eff = binding.observed_effect
+        assert eff is not None
         mde = MdeInfo(
-            mde_pp=h, source="provisional_planning_heuristic", label="provisional planning heuristic (not a business target)",
-            observed_effect=eff, observed_for=event,
+            mde_pp=binding.mde_pp, per_arm=sized, source="provisional_planning_heuristic",
+            label="provisional planning heuristic (not a business target)", observed_effect=eff, observed_for=binding.event,
             caveats=[
                 (
                     f"Reverses the sign of the {100 * eff.level:g}% interval bound nearest zero ({eff.lower:+.3f} to {eff.upper:+.3f} pp), "
@@ -494,34 +597,41 @@ def design_experiment(
                     "true effect of a rollback can be smaller."
                 ),
                 "Prefer a declared business target (mde_pp).",
-            ] + (["Several arms: the smallest-magnitude value over the arms sizes every arm."] if len(targets) > 1 else []),
+            ] + ([
+                (
+                    f"Each arm is sized for its own target, and the arm that needs the most sessions ({binding.event}, {binding.mde_pp:+.3g} pp) "
+                    "sets the sample size, so every arm reaches the target power for its own target."
+                )
+            ] if len(sized) > 1 else []),
         )
 
-    # ---- plans ---------------------------------------------------------------------------
-    pairs = [(c.event, c.event) for c in targets]
-    try:
-        plan = _plan(pairs, baseline_rate, mde.mde_pp, daily, alpha=alpha, power=power, allocation_ratio=allocation_ratio)
-    except ValueError as exc:
-        return _needs(f"the sample-size calculation is not possible: {exc}", ["mde_pp"], baseline=baseline, traffic=traffic, mde=mde, **base_kw)
-
+    # ---- the shared-control option when more than one candidate is still open ------------------------------------
     alt_plan = alt_note = None
     if arms == "leading" and len(open_) >= 2:
-        alt_mde: float | str = declared if declared is not None else _size_mde(open_, panel)
-        if not isinstance(alt_mde, str):
-            alt_value = alt_mde if declared is not None else alt_mde[0]
+        alt_onsets = [(c, open_onset[c.event]) for c in open_]
+        alt_sized = _arm_mdes(alt_onsets, panel, declared, baseline_rate)
+        limited = [c.event for c in open_ if c.verdict == "rejected"]
+        base_note = (
+            f"Offered because {len(open_)} candidates are still open: if independent rollbacks are feasible and comparing their "
+            f"contributions is the objective, run {len(open_)} rollback arms against one shared control (alpha {alpha:g} divided by "
+            f"{len(open_)}; power {power:g} is per comparison, not for the whole experiment)."
+        )
+        if limited:
+            base_note += (
+                " " + ", ".join(limited) + " stays open only as a lag-limited alternative: it was rejected at its declared lag "
+                "but not at lag 1, so its arm tests whether it contributes if it acts with a one-day delay."
+            )
+        if isinstance(alt_sized, str):
+            alt_note = base_note + f" It cannot be sized yet: {alt_sized}. Declare a business target with mde_pp."
+        else:
             try:
-                alt_plan = _plan([(c.event, c.event) for c in open_], baseline_rate, alt_value, daily, alpha=alpha, power=power,
-                                 allocation_ratio=allocation_ratio)
-                alt_note = (
-                    f"Offered because {len(open_)} candidates are still open: if independent rollbacks are feasible and comparing their "
-                    f"contributions is the objective, run {len(open_)} rollback arms against one shared control (alpha {alpha:g} divided by "
-                    f"{len(open_)}; power {power:g} is per comparison, not for the whole experiment). Its minimum detectable effect is "
-                    f"{alt_value:+.3g} pp."
-                )
-            except ValueError:
-                alt_plan = None
+                alt_plan = _plan([(m, _limit_note(c, o)) for m, (c, o) in zip(alt_sized, alt_onsets, strict=True)], baseline_rate, daily,
+                                 alpha=alpha, power=power, allocation_ratio=allocation_ratio)
+                alt_note = base_note
+            except ValueError as exc:
+                alt_note = base_note + f" It cannot be sized: {exc}."
 
-    # ---- wording --------------------------------------------------------------------------
+    # ---- wording --------------------------------------------------------------------------------------------------
     target_names = " and ".join(c.event for c in targets)
     direction = "raise" if mde.mde_pp > 0 else "lower"
     intervention = (
@@ -530,19 +640,34 @@ def design_experiment(
         if len(targets) == 1 else
         f"Randomly assign sessions in {focal.label} to the current experience (one shared control) or to a rollback of exactly one of: {target_names}; other releases stay fixed."
     )
-    hypothesis = (
-        f"If {target_names} currently contributes to the conversion of {focal.label}, then rolling it back for randomly assigned sessions "
-        f"would {direction} conversion by about {abs(mde.mde_pp):.3g} pp relative to the sessions that keep it. A null result would mean "
-        "the rollback does not change conversion by an amount this experiment can detect. This tests the release's current contribution "
-        "and cannot establish that it was the sole historical cause."
+    caution = (
+        f"If the experiment did not detect a change, that does not show that the rollback has no effect: at {power:g} power an effect of "
+        "the planned size can still be missed, and excluding meaningful effects needs a confidence interval or an equivalence assessment "
+        "against a declared margin. "
     )
+    hypothesis = (
+        (
+            f"If {target_names} currently contributes to the conversion of {focal.label}, then rolling it back for randomly assigned sessions "
+            f"would {direction} conversion by about {abs(mde.mde_pp):.3g} pp relative to the sessions that keep it. "
+        )
+        if len(targets) == 1 else
+        (
+            f"If any of {target_names} currently contributes to the conversion of {focal.label}, then rolling that release back for randomly "
+            "assigned sessions would change conversion by about that arm's planning target relative to the sessions that keep it (see the arm targets). "
+        )
+    ) + caution + "This tests a release's current contribution and cannot establish that it was the sole historical cause."
     non_focal = {"sessions": int(use["s_c"].sum()), "orders": int(use["o_c"].sum())}
-    ref = ({**non_focal, "conversion_rate": non_focal["orders"] / non_focal["sessions"]} if non_focal["sessions"] > 0 else non_focal)
+    has_outside = non_focal["sessions"] > 0
+    ref = {**non_focal, "conversion_rate": non_focal["orders"] / non_focal["sessions"]} if has_outside else non_focal
     guardrails = [
         Guardrail(name="Sample-ratio mismatch (SRM)", kind="assignment_diagnostic", computable_from_current_data=False,
                   detail="Compare the assigned arm sizes with the planned allocation. Needs the experiment's assignment logs; it cannot be computed from the metrics table."),
-        Guardrail(name="Conversion in traffic outside the experiment", kind="external_monitor", computable_from_current_data=True,
-                  detail="Watch conversion of the sessions that are not enrolled, as a monitor for a concurrent change. It is only meaningful while those sessions stay outside the experiment. Reference: the same days, outside the focal segment.",
+        Guardrail(name="Conversion in traffic outside the experiment", kind="external_monitor", computable_from_current_data=has_outside,
+                  detail=(
+                      "Watch conversion of the sessions that are not enrolled, as a monitor for a concurrent change. It is only meaningful while those sessions stay outside the experiment. Reference: the same days, outside the focal segment."
+                      if has_outside else
+                      "There are no sessions outside the focal segment in this data, so there is nothing to monitor yet. Supply the rest of the traffic to use this guardrail."
+                  ),
                   reference=ref),
         Guardrail(name="Revenue or order value per session", kind="requires_instrumentation", computable_from_current_data=False,
                   detail="The metrics table has sessions and orders only, so value per order cannot be measured; it needs new instrumentation."),
@@ -554,14 +679,18 @@ def design_experiment(
         traffic.assumption + ".",
         f"Duration is the slowest-filling arm's days, rounded up to whole weeks ({plan.duration_days} days, {plan.duration_weeks} week(s)); the shared control is counted once.",
         "The rollback tests the current contribution of the release with other releases held fixed; it does not establish the sole historical cause.",
-        f"The baseline is the usable post-period focal conversion ({baseline.orders:,} orders in {baseline.sessions:,} sessions, {baseline.first_day} to {baseline.last_day}), the experience the control arm keeps.",
+        f"The baseline is the usable post-period focal conversion ({baseline.orders:,} orders in {baseline.sessions:,} sessions, {baseline.first_day} to {baseline.last_day}), the experience the control arm keeps. It does not need a comparison group.",
         "Sample size and power use the normal approximation; see the warnings for whether it is reliable here.",
-    ] + plan.power.assumptions
-    warnings = list(plan.power.warnings)
+        *[a.hypothesis_limit for a in plan.arms if a.hypothesis_limit],
+        *plan.power.assumptions,
+    ]
+    warnings = list(plan.warnings)
     if excluded:
         warnings.append("flagged days " + ", ".join(str(x) for x in excluded) + " were removed from the baseline and traffic")
     if mde.source == "provisional_planning_heuristic":
         warnings.append("the minimum detectable effect is a provisional planning heuristic, not a business target")
+    if target_candidate is not None and target_candidate not in open_onset:
+        warnings.append(f"{target_candidate} was rejected at every evaluated lag; the arm tests it because it was named explicitly")
     summary = (
         f"{'Confirmation' if purpose == 'confirm' else 'Settling'} experiment (evidence {strength}): {len(plan.arms)}-arm randomized rollback in "
         f"{focal.label}. Detect {mde.mde_pp:+.3g} pp from a baseline of {100 * baseline_rate:.3g}% [{mde.label}] with "

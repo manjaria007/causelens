@@ -350,3 +350,29 @@ For each task, record:
 - Not done, by design: no experiment for `no_candidates` or `not_localized` (returns `needs_input`), no factorial
   design for interacting releases, no visitor-level randomization. No MCP exposure (Task 7).
 - Simulator, `data/`, `ground_truth.json`, steering and the Requirement 10.2 grader were not changed.
+
+### Task 6 review round 1 (PR #6, review supplied by the user)
+
+- Seven findings, each reproduced on `08a79bd` before any change (17 of the 20 new regression tests failed on it; the
+  other three are controls): a focal-only dataset gave "0 usable post-period days" because the panel's `usable` flag
+  needs comparison sessions; Hero, rejected at lag 0 but `inconclusive` at lag 1, was dropped from the options; targets
+  of -0.600 and +0.601 pp shared one sign and the positive arm had 66.4% power; the hypothesis said a null result would
+  mean no change; `power_analysis(.01, 1.8, allocation_ratio=.5)` called a design reliable with 6.31 expected treatment
+  successes under the all-baseline null; `power_analysis(.58, 41.5, power=.17, allocation_ratio=.09)` returned 45/5 where
+  34/4 already reaches the target; and `power_analysis(.03, .00008)` was rejected as above 10^12 although it needs about
+  7.1 x 10^11 (doubling jumped from 2^39 to 2^40).
+- Fixes: the panel has a `focal_usable` column and the design uses it (additive; `usable` is unchanged). A candidate is
+  open if it is not rejected at some evaluated lag; a lag-limited arm is sized at that onset and says so, and the default
+  stays two-arm. Each arm is sized for its own target, the neediest arm sets `n`, and the sparse regime where no common
+  `n` suits every arm returns `needs_input`. The wording says "did not detect ... does not show that the rollback has no
+  effect" and points to an interval or an equivalence assessment. The sparse diagnostic includes the all-baseline null
+  cells. Minimality is checked exhaustively for every smaller `n` up to 1,000,000 (`minimality = "exhaustive"`) and above
+  that is a bisection that assumes monotonicity (`"assumed_monotone"`, stated in the assumptions). The cap is tested
+  itself before giving up.
+- Three tests of mine encoded the reviewed behaviour (Hero never offered, the smallest magnitude sizing every arm,
+  `each_candidate` refused for the reference case). They were updated to the corrected contract, not deleted.
+- The Monte Carlo table is unchanged (identical output at 2,000,000 replications), and the reference design is still
+  10,216 sessions per arm, 2 traffic days, 7 days rounded.
+- Mutation checks: six mutations of the fixes (control required again, lag-limited candidates dropped, one shared target,
+  null cell ignored, no exhaustive scan, cap tested after the overshoot) were each caught by a named review test.
+- Verification order: the new regressions and affected modules after each change, then the full suite once at the end.

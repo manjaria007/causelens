@@ -222,11 +222,12 @@ def test_an_ambiguous_leading_candidate_also_gets_the_shared_control_option(ambi
     assert "shared control" in d.alternative_note and "per comparison" in d.alternative_note and "independent rollbacks" in d.alternative_note
 
 
-def test_no_alternative_is_offered_when_only_one_candidate_is_open(planted):
+def test_a_candidate_rejected_at_lag_zero_but_open_at_lag_one_stays_as_a_lag_limited_alternative(planted):
     metrics, events, res = planted
-    assert cand(res, HERO).verdict == "rejected"
+    assert cand(res, HERO).verdict == "rejected"  # rejected as the sole immediate explanation (lag 0) ...
     d = design_experiment(metrics, res, POST, events=events)
-    assert d.alternative_plan is None and d.alternative_note is None
+    assert d.alternative_plan is not None and "lag-limited" in d.alternative_note  # ... but still a possible contributor at lag 1
+    assert [a.role for a in d.plan.arms] == ["control", "rollback"]  # the default stays two-arm
 
 
 def test_each_candidate_uses_one_shared_control_counted_once_and_divides_alpha(ambiguous):
@@ -244,11 +245,12 @@ def test_each_candidate_uses_one_shared_control_counted_once_and_divides_alpha(a
     assert "exactly one of" in d.intervention
 
 
-def test_each_candidate_without_a_declared_target_sizes_every_arm_by_the_smallest_estimate(ambiguous):
+def test_each_candidate_without_a_declared_target_sizes_every_arm_for_its_own_estimate(ambiguous):
     metrics, events, res = ambiguous
     d = design_experiment(metrics, res, POST, events=events, arms="each_candidate")
     if d.status == "ok":
-        assert d.mde.source == "provisional_planning_heuristic" and any("smallest-magnitude" in c for c in d.mde.caveats)
+        assert d.mde.source == "provisional_planning_heuristic" and any("own target" in c for c in d.mde.caveats)
+        assert all(a.achieved_power >= 0.8 for a in d.plan.arms[1:])
     else:
         assert d.needs == ["mde_pp"]
 
@@ -327,9 +329,12 @@ def test_invalid_arguments_raise(planted, kwargs):
 
 
 def test_each_candidate_needs_two_open_candidates_and_windows_must_be_valid(planted):
-    metrics, events, res = planted
+    metrics, events, _ = planted
+    ev = events.copy()
+    ev.loc[ev.name == HERO, "scope"] = "device=desktop"  # Hero is then rejected at every lag, leaving one open candidate
+    _, res = run_pipeline(metrics, ev)
     with pytest.raises(ValueError, match="at least two"):
-        design_experiment(metrics, res, POST, events=events, arms="each_candidate", mde_pp=0.3)
+        design_experiment(metrics, res, POST, events=ev, arms="each_candidate", mde_pp=0.3)
     with pytest.raises(ValueError):
         design_experiment(metrics, res, (POST[1], POST[0]), events=events)
     with pytest.raises(ValueError):
