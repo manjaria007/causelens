@@ -69,6 +69,24 @@ effect -0.6618. Projected overall change -0.206 pp, 95% CI [-0.234, -0.177] (pla
 Hero is `rejected` as the sole immediate explanation. Hero at lag 1 coincides with Checkout at lag 0, so that pair is
 unidentifiable from the data and the Hero lag-1 verdict is `inconclusive`.
 
+### Uniform pattern test with a sparse segment (null, 400 datasets per row)
+
+`python tests/calibration/run_pattern_null.py --n 400`. Truth is uniform. Two dense segments plus one sparse segment
+seen on `k` days in each window (4,000 sessions on each of those days). The sparse segment is excluded when it has
+fewer than 3 active days in a window.
+
+| active days of the sparse segment per window | falsely contradicted (95% Wilson) | sparse segment excluded |
+|---|---|---|
+| 0 (absent) | 16/400, 4.0% (2.5-6.4%) | 0/400 |
+| 1 | 12/400, 3.0% (1.7-5.2%) | 400/400 |
+| 2 | 15/400, 3.8% (2.3-6.1%) | 400/400 |
+| 3 (the minimum that is included) | 20/400, 5.0% (3.3-7.6%) | 0/400 |
+| 5 | 10/400, 2.5% (1.4-4.5%) | 0/400 |
+| 10 | 10/400, 2.5% (1.4-4.5%) | 0/400 |
+
+Before the fix, one active day per window gave 37 false contradictions in 40 datasets. The attribution scenarios
+declare no pattern, so this fix does not change them and they were not rerun.
+
 ### Full pipeline, 150 seeds per scenario
 
 `python tests/calibration/run_attribution.py --scenarios <name> --n 150`. The pipeline is quality, confirm

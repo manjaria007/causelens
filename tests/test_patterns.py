@@ -257,3 +257,51 @@ def test_check_pattern_dispatches_on_the_declared_kind(sim_days):
     assert check_pattern(ExpectedPattern(kind="uniform"), d, u, PRE_D, POST_D).kind == "uniform"
     r = check_pattern(ExpectedPattern(kind="restricted", scope={"device": "mobile", "browser": "safari"}, equivalence_margin_pp=1.0), d, u, PRE_D, POST_D)
     assert r.kind == "restricted" and r.absence_claimed
+
+
+# ------------------------------------------------------------------ excluded (sparse) traffic
+
+
+def _with_sparse_segment(seed: int, rate_change: float = 0.0) -> pd.DataFrame:
+    """Segments a and b plus ``rare``: seen on one day in each window, with 4,000 sessions that day."""
+    df = partition_frame(seed, {"a": 0.0, "b": 0.0})
+    rng = np.random.default_rng(10_000 + seed)
+    extra = []
+    for day, change in (("2026-08-05", 0.0), ("2026-08-25", rate_change)):
+        extra.append({"date": day, "device": "rare", "browser": "chrome", "channel": "organic", "customer_type": "new",
+                      "sessions": 4000, "orders": int(rng.binomial(4000, 0.04 * (1 + change)))})
+    return validate_metrics(pd.concat([df.assign(date=df["date"].dt.strftime("%Y-%m-%d")), pd.DataFrame(extra)], ignore_index=True))
+
+
+def test_a_segment_with_one_active_day_per_window_is_excluded_with_its_reason_and_traffic_disclosed():
+    df = _with_sparse_segment(3)
+    part = next(p for p in uniform_test(df, all_days(df), PRE_W, POST_W).partitions if p.dimension == "device")
+    assert part.included == ["a", "b"] and set(part.excluded) == {"rare"}
+    assert "active days" in part.excluded["rare"] and "variance cannot be estimated" in part.excluded["rare"]
+
+
+def test_excluding_sparse_traffic_leaves_the_other_segments_result_unchanged():
+    base = partition_frame(4, {"a": 0.0, "b": 0.0})
+    with_rare = _with_sparse_segment(4)
+    p0 = next(p for p in uniform_test(base, all_days(base), PRE_W, POST_W).partitions if p.dimension == "device")
+    p1 = next(p for p in uniform_test(with_rare, all_days(with_rare), PRE_W, POST_W).partitions if p.dimension == "device")
+    assert p1.included == p0.included and p1.p_value == pytest.approx(p0.p_value, rel=1e-9)
+
+
+def test_sparse_segment_null_calibration_stays_near_the_nominal_level():
+    """Uniform truth, one sparse segment: false contradictions must stay near alpha (37 of 40 before the fix)."""
+    contradicted = 0
+    trials = 60
+    for seed in range(trials):
+        df = _with_sparse_segment(seed)
+        contradicted += uniform_test(df, all_days(df), PRE_W, POST_W).status == "contradicted"
+    assert contradicted / trials <= 0.12, contradicted
+
+
+def test_a_holm_p_value_of_zero_contradicts_the_pattern(monkeypatch):
+    from causelens.analytics import patterns as mod
+
+    df = partition_frame(9, {"a": 0.0, "b": 0.0})
+    monkeypatch.setattr(mod, "holm_adjust", lambda ps: [0.0 for _ in ps])
+    r = uniform_test(df, all_days(df), PRE_W, POST_W)
+    assert r.status == "contradicted" and "p = 0" in r.detail

@@ -281,3 +281,16 @@ For each task, record:
   now all flagged; weak-effect errors split into flagged and unflagged; gradual_hero no longer scores "correct").
   The runs had to be split into chunks of at most 56 seeds because 29-minute tool calls time out.
 - Results: `.venv/bin/python -m pytest -q` passed (626 tests) and `.venv/bin/python -m ruff check causelens tests` passed.
+
+### Task 5 review round 1, follow-up (verification plan)
+
+- Added the excluded-traffic regressions to `tests/test_patterns.py` (sparse segment excluded with its reason, the
+  other segments' result unchanged by excluding it, a 60-dataset null calibration, and Holm p = 0). All four fail on
+  `aec76b9`'s `patterns.py` and pass now.
+- Sparse-pattern null calibration (`tests/calibration/run_pattern_null.py`, 400 datasets per row) is in
+  `docs/candidate-testing.md`: 2.5% to 5.0% false contradictions from 0 to 10 active days. The attribution scenarios
+  were not rerun because they declare no pattern.
+- The Stop hook now runs Ruff only (separate branch `hook-pytest-on-stop`, not part of this PR). Its execution by
+  Kiro is still unverified.
+- Verification order from now on: the new regression and the affected module after each change, dependent integration
+  tests once a block is stable, and the full suite and Ruff once after the final code change.
