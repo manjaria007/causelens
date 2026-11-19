@@ -171,10 +171,16 @@ def test_the_kiro_examples_name_every_tool_and_use_real_options():
     assert Path(stdio["env"]["PYTHONPATH"]) == Path(stdio["command"]).parents[2]
 
 
-def test_the_example_dataset_config_resolves_to_the_reference_files():
+def test_the_example_dataset_config_resolves_to_the_reference_files(files, tmp_path):
+    """The example config's relative paths, in a copy of the repository layout (so this does not need the generated CSV)."""
+    import shutil
+
     from causelens.mcp import DatasetRegistry
 
-    if not (ROOT / "data" / "metrics_daily.csv").is_file():
-        pytest.skip("the generated reference metrics file is not present")
-    registry = DatasetRegistry.from_sources(config_file=DOCS / "datasets.example.json")
+    (tmp_path / "docs" / "mcp").mkdir(parents=True)
+    (tmp_path / "data").mkdir()
+    shutil.copy(DOCS / "datasets.example.json", tmp_path / "docs" / "mcp" / "datasets.example.json")
+    shutil.copy(files[0], tmp_path / "data" / "metrics_daily.csv")
+    shutil.copy(files[1], tmp_path / "data" / "events.csv")
+    registry = DatasetRegistry.from_sources(config_file=tmp_path / "docs" / "mcp" / "datasets.example.json")
     assert registry.ids == ["reference"] and registry.load("reference").events is not None

@@ -6,6 +6,7 @@ that names one is rejected when the server starts.
 """
 import hashlib
 import json
+import os
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -79,14 +80,44 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _looks_like_key(name: str) -> bool:
+    return _FORBIDDEN_NAME in name.lower()
+
+
+def _link_chain(path: Path) -> list[Path]:
+    """The path and every symlink hop after it (a chain is followed, a loop is cut off)."""
+    chain, seen = [path], set()
+    current = path
+    while current.is_symlink() and current not in seen and len(chain) < 40:
+        seen.add(current)
+        current = current.parent / os.readlink(current)
+        chain.append(current)
+    return chain
+
+
 def _check_path(dataset_id: str, role: str, path: Path) -> Path:
-    if _FORBIDDEN_NAME in path.name.lower():
-        raise DatasetConfigError(
-            f"dataset {dataset_id!r}: the {role} file {path.name!r} looks like the answer key; the server never reads it"
-        )
-    resolved = path.expanduser().resolve()
+    """Resolve a configured file and refuse the answer key however it is reached.
+
+    The name of the supplied path, of every symlink hop and of the final target are checked, and so is identity: a hard link
+    to a ``ground_truth*`` file in the same directory as the target is refused. The *resolved* path is what the registry
+    keeps and reads, so a link that is re-pointed after startup cannot change what is read.
+    """
+    supplied = path.expanduser()
+    resolved = supplied.resolve()
+    for hop in (*_link_chain(supplied), resolved):
+        if _looks_like_key(hop.name):
+            via = "" if hop is supplied else f", reached through {hop.name!r}"
+            raise DatasetConfigError(
+                f"dataset {dataset_id!r}: the {role} file {supplied.name!r} resolves to the answer key{via}; the server never reads it"
+            )
     if not resolved.is_file():
         raise DatasetConfigError(f"dataset {dataset_id!r}: the {role} file {str(path)!r} does not exist or is not a file")
+    for sibling in resolved.parent.iterdir():
+        if _looks_like_key(sibling.name) and sibling.is_file() and os.path.samefile(sibling, resolved):
+            raise DatasetConfigError(
+                f"dataset {dataset_id!r}: the {role} file {supplied.name!r} is the same file as {sibling.name!r}, the answer key; "
+                "the server never reads it"
+            )
     return resolved
 
 
@@ -180,6 +211,16 @@ def _without_paths(message: str, cfg: DatasetConfig) -> str:
     return message
 
 
+def _optional_text(item: dict, key: str, where: str, *, what: str) -> str | None:
+    """A string, or ``None`` when the key is omitted or explicitly null. Anything else is an error, never a silent default."""
+    value = item.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise DatasetConfigError(f"{where}: {key!r} must be {what}, a non-empty string, null or omitted, got {value!r}")
+    return value
+
+
 def _read_config_file(path: Path) -> list[DatasetConfig]:
     try:
         raw = json.loads(path.read_text())
@@ -190,21 +231,28 @@ def _read_config_file(path: Path) -> list[DatasetConfig]:
     items = raw.get("datasets") if isinstance(raw, dict) else None
     if not isinstance(items, list) or not items:
         raise DatasetConfigError(f'the config file {str(path)!r} must be {{"datasets": [{{"id": ..., "metrics": ...}}, ...]}}')
+    if set(raw) - {"datasets"}:
+        raise DatasetConfigError(f"the config file {str(path)!r} has unknown top-level keys: {sorted(set(raw) - {'datasets'})}")
     base = path.resolve().parent
     out: list[DatasetConfig] = []
-    for item in items:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("metrics"), str):
-            raise DatasetConfigError(f"each dataset in {str(path)!r} needs a string 'id' and 'metrics' (and optionally 'events', 'description')")
+    for position, item in enumerate(items):
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise DatasetConfigError(f"dataset {position} in {str(path)!r} must be an object with a string 'id'")
+        where = f"dataset {item['id']!r} in {str(path)!r}"
         unknown = set(item) - {"id", "metrics", "events", "description"}
         if unknown:
-            raise DatasetConfigError(f"dataset {item['id']!r} in {str(path)!r} has unknown keys: {sorted(unknown)}")
-        events = item.get("events")
+            raise DatasetConfigError(f"{where} has unknown keys: {sorted(unknown)}")
+        metrics = _optional_text(item, "metrics", where, what="a file name")
+        if metrics is None:
+            raise DatasetConfigError(f"{where} needs a 'metrics' file name")
+        events = _optional_text(item, "events", where, what="a file name")
+        description = _optional_text(item, "description", where, what="text")
         out.append(
             DatasetConfig(
                 id=item["id"],
-                metrics=base / item["metrics"],
-                events=base / events if isinstance(events, str) else None,
-                description=str(item.get("description", "")),
+                metrics=base / metrics,
+                events=base / events if events is not None else None,
+                description=description or "",
             )
         )
     return out

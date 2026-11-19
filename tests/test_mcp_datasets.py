@@ -114,7 +114,7 @@ def test_a_config_file_resolves_paths_relative_to_itself(files, tmp_path):
 
 @pytest.mark.parametrize(
     "content, match",
-    [("not json", "not valid JSON"), ("[]", "must be"), ('{"datasets": []}', "must be"), ('{"datasets": [{"id": "a"}]}', "needs a string"),
+    [("not json", "not valid JSON"), ("[]", "must be"), ('{"datasets": []}', "must be"), ('{"datasets": [{"id": "a"}]}', "needs a 'metrics' file name"),
      ('{"datasets": [{"id": "a", "metrics": "m.csv", "bogus": 1}]}', "unknown keys")],
 )
 def test_a_malformed_config_file_is_rejected(tmp_path, content, match):

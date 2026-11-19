@@ -4,10 +4,20 @@ These are the only types the adapter defines for tool *inputs*. Everything a too
 tool accepts, is an existing ``causelens.analytics`` model, so the published schemas are generated from the analytics
 code and cannot drift from it.
 """
+import json
 from datetime import date
-from typing import Annotated
+from typing import Annotated, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    ValidationError,
+)
 
 __all__ = [
     "AlphaLevel",
@@ -18,8 +28,42 @@ __all__ = [
     "PreWindow",
     "Segment",
     "SegmentSpec",
+    "StrictBool",
+    "StrictFloat",
     "StrictInt",
+    "strictly",
 ]
+
+M = TypeVar("M", bound=BaseModel)
+
+
+class _StrictJson:
+    """Validate a model-typed argument as strict JSON: ``true`` is not a number, ``"0.5"`` is not 0.5, ``5.0`` is not 5.
+
+    The SDK validates arguments leniently, so a bare ``float`` field quietly turns ``true`` into ``1.0`` and a numeric
+    string into a number. Prior results and settings are typed models whose fields would be coerced the same way, so each
+    is re-validated here, in JSON mode with ``strict=True`` (dates are still ISO strings, and JSON integers are still
+    accepted for float fields).
+    """
+
+    def __init__(self, model: type[BaseModel]):
+        self.model = model
+
+    def __call__(self, value: object) -> object:
+        if isinstance(value, self.model):
+            return value
+        try:
+            return self.model.model_validate_json(json.dumps(value), strict=True)
+        except ValidationError as exc:
+            detail = "; ".join(f"{'.'.join(str(p) for p in e['loc']) or self.model.__name__}: {e['msg']}" for e in exc.errors()[:6])
+            raise ValueError(detail) from None
+        except TypeError as exc:
+            raise ValueError(f"not a JSON value: {exc}") from None
+
+
+def strictly(model: type[M]) -> type[M]:
+    """``model`` for use as a tool argument type, validated as strict JSON (see ``_StrictJson``)."""
+    return Annotated[model, BeforeValidator(_StrictJson(model))]  # type: ignore[return-value]
 
 
 class DateWindow(BaseModel):
@@ -57,4 +101,4 @@ FocalSpec = Annotated[
 DatasetId = Annotated[str, Field(description="Id of a configured dataset. Call list_datasets to see the ids.")]
 PreWindow = Annotated[DateWindow, Field(description="The baseline window (before the change), inclusive dates.")]
 PostWindow = Annotated[DateWindow, Field(description="The window after the change, inclusive dates.")]
-AlphaLevel = Annotated[float, Field(description="Probability in (0, 1).")]
+AlphaLevel = Annotated[StrictFloat, Field(description="Probability in (0, 1).")]

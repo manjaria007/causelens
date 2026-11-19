@@ -582,7 +582,7 @@ def test_a_candidate_result_made_with_other_exclusions_is_refused(mcp, prior):
     args = {"dataset_id": "reference", "candidate_testing": as_json(prior["tc"]), "post_window": window(POST), "quality": as_json(prior["q"])}
     assert not mcp.call("design_experiment", args).is_error
     text = error_text(mcp.call("design_experiment", {**args, "apply_exclusions": False}))
-    assert "different exclusions" in text and "apply_exclusions" in text
+    assert "was not computed on this dataset and population" in text and "exclusions" in text and "apply_exclusions" in text
 
 
 def test_a_decomposition_for_other_windows_is_refused(mcp, prior):

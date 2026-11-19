@@ -476,3 +476,52 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   format and are tested for valid JSON and real flags). Automatic execution of the Stop hook is still unverified.
 - Known costs: `tools/list` is about 270 KB of schema (typed prior results), and `decompose_change` returns about 164 KB.
   There is no authentication on the HTTP transport (loopback by default). Task 8 is not started.
+
+### Task 7 review round 1 (PR #7, review supplied by the user)
+
+- Four groups of findings, each reproduced on `0b288c7` with a failing test first (53 of the 78 new regression tests failed;
+  the rest are controls such as "a matching result is still accepted"). Numbers from my reproductions, on variants of the
+  reference data built in memory (`tests/mcp_variants.py`):
+  1. Binding. A DiD result from the reference data was accepted for a dataset with the same sessions and a rise, and
+     `project_impact` returned -0.206 pp where that data give +0.195 pp. A stale candidate-testing result sized a rollback
+     at +0.585 pp where the data give -0.523 pp (the wrong direction). A DiD for mobile/safari was accepted for an
+     equal-sized mobile/chrome population (-0.189 pp where the data give +0.067 pp). The old check compared dates and session
+     totals, which none of these differ in. A stale quality report is the same defect: it changes which days are excluded.
+  2. Coercion. `mde_pp: true` ran as a 1.0 pp effect, `"0.5"` as 0.5, `allocation_ratio: true` as 1.0, and
+     `apply_exclusions: "false"` was accepted. The SDK validates arguments leniently, and so did the typed models inside prior
+     results and settings.
+  3. A symlink named `metrics.csv` pointing at a file named `ground_truth.json` was accepted at startup. I used a scratch
+     stand-in file; the real answer key was never opened.
+  4. `"events": ["events.csv"]` started the server with no event log.
+- Decisions. (1) Bind a prior result by **reproducing** it: recompute with the existing analytics from the named dataset and
+  the settings the result records, and require equality (floats to a relative 1e-9). That needs no new state, tokens or
+  fields on the analytics models, works for any client, and changes no value. It covers `quality`, `did`, `candidate_testing`
+  and `decomposition` (`causelens/mcp/provenance.py`). A change point is not checked: it records too few settings to
+  recompute faithfully, and the tool only joins its dates to the event log. The cost is a recomputation (about 0.13 s for a
+  quality report, about 0.2 s for a DiD); the slowest call is now 564 ms and a cold connection plus `test_candidates` 735 ms.
+  A hand-edited quality report is refused on purpose. (2) Numbers, integers and flags are strict per field, and model-typed
+  arguments are re-validated as strict JSON (`strictly()` in `causelens/mcp/models.py`), so the same holds inside them. The
+  published schemas are unchanged. (3) A configured file is checked by name, by every symlink hop, by its resolved target and
+  by identity against a `ground_truth*` sibling (a hard link), and the resolved path is what is kept, so a link re-pointed after
+  startup cannot redirect a read. A hard link from another directory cannot be detected. (4) Config-file values must be a string,
+  null or omitted; unknown keys are rejected.
+- Mistakes of mine. My first test file for these fixes had junk in it (a nonsense assertion, a placeholder `A.QualityHolder`,
+  a convoluted `ids=`), cleaned before its first run. Two tests encoded my own earlier wording ("different exclusions", a
+  `cov` edit that I expected to name `cov`); the new check recomputes with the claimed `cov`, so the numbers disagree instead,
+  and the tests now say that. The "baseline: true" strictness case passed on the old code by accident (1.0 is an invalid
+  baseline), so it was removed as a regression.
+- Mutation checks on the fixes: 11 mutations (each binding check disabled, `quality` unchecked in one tool, no decomposition
+  check, a lax `mde_pp`, lax nested models, no hard-link check, a non-string `events` dropped, the supplied path kept instead
+  of the resolved one). All are caught except one, which is an equivalent mutant: dropping the check of the resolved target's
+  name changes nothing, because the identity check catches the same file. The layers overlap deliberately.
+- Results: `.venv/bin/python -m pytest -q` passed (992 tests, 358 s, none skipped) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP block alone is 222 tests. A test that skipped when the generated CSV was absent now builds its own copy of the
+  layout, so none depends on `data/metrics_daily.csv`.
+- Order of work: failing regressions on the old code, the fixes, the focused MCP tests, the whole MCP block, then the full suite
+  once. No statistical code changed (`causelens/analytics/` is identical to `main`), so no calibration was rerun.
+- **Kiro tool call: still not verified.** The tool catalogue of this session does not include `causelens`, and the workspace
+  settings directory `/projects/sandbox/.kiro/settings/` is read-only to me, so I could not install the config. What I did
+  check: the exact command in `docs/mcp/kiro-stdio.json`, run from the workspace root as a process, initializes, lists 14
+  tools, answers `power_analysis` (8,158 per arm), refuses `mde_pp: true`, and exits 0 with nothing on stderr. That is not a
+  Kiro call. The steps to verify one are in `docs/mcp-server.md` ("Verify an actual Kiro tool call"). Do not start Task 8
+  until that has been done and recorded here.

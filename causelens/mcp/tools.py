@@ -19,7 +19,6 @@ from collections.abc import Callable
 from datetime import date
 from typing import Literal, ParamSpec, TypeVar
 
-import pandas as pd
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -66,11 +65,29 @@ from causelens.mcp.models import (
     PreWindow,
     Segment,
     SegmentSpec,
+    StrictBool,
+    StrictFloat,
     StrictInt,
+    strictly,
+)
+from causelens.mcp.provenance import (
+    require_candidate_result,
+    require_decomposition,
+    require_did,
+    require_quality,
 )
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+# Model-typed arguments are validated as strict JSON (see causelens.mcp.models.strictly); the published schemas are unchanged.
+QualityIn = strictly(DataQualityReport)
+DetectorIn = strictly(DetectorParams)
+ChangePointIn = strictly(ChangePointResult)
+DecompositionIn = strictly(DecompositionResult)
+CandidateTestingIn = strictly(CandidateTestingResult)
+DidIn = strictly(DidResult)
+PatternIn = strictly(ExpectedPattern)
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
@@ -113,27 +130,6 @@ def _guarded(fn: Callable[P, R]) -> Callable[P, R]:
 # --------------------------------------------------------------------------- consistency checks
 
 
-def _require_same_population(did: DidResult, panel) -> None:
-    """The DiD result must have been computed on the population the caller describes."""
-    onset = pd.Timestamp(did.event_date)
-    use = panel.daily[panel.daily["usable"].to_numpy(dtype=bool)]
-    pre, post = use[use.index < onset], use[use.index >= onset]
-    found = {
-        "excluded_dates": list(panel.excluded_dates),
-        "n_days_pre": len(pre),
-        "n_days_post": len(post),
-        "focal_sessions_post": int(post["s_f"].sum()),
-        "comparison_sessions_post": int(post["s_c"].sum()),
-    }
-    given = {k: getattr(did, k) for k in found}
-    differs = [f"{k}: result has {given[k]!r}, this dataset and population give {found[k]!r}" for k in found if given[k] != found[k]]
-    if differs:
-        raise ToolError(
-            "The DiD result was not computed on this dataset and population (" + "; ".join(differs) + "). Pass the same "
-            "dataset_id, focal, comparison, quality and apply_exclusions that produced it."
-        )
-
-
 def _require_same_windows(decomposition: DecompositionResult | None, pre: DateWindow, post: DateWindow) -> None:
     if decomposition is None:
         return
@@ -142,19 +138,6 @@ def _require_same_windows(decomposition: DecompositionResult | None, pre: DateWi
         raise ToolError(
             f"The decomposition covers pre {got[0][0]} to {got[0][1]} and post {got[1][0]} to {got[1][1]}, which differs from the "
             f"windows given ({pre.start} to {pre.end}; {post.start} to {post.end}). Use the same windows for both calls."
-        )
-
-
-def _require_same_exclusions(result: CandidateTestingResult, data, quality, apply_exclusions: bool) -> None:
-    """Rebuild the focal panel and require the same removed days as the candidate test used."""
-    if result.focal is None or result.exclusions is None:
-        return
-    panel = _build_panel(data.metrics, result.focal.segments, events=data.events, quality=quality, apply_exclusions=apply_exclusions)
-    if panel.disclosure != result.exclusions:
-        raise ToolError(
-            "The candidate-testing result was produced with different exclusions than this call would apply (a different "
-            "dataset_id, quality report or apply_exclusions). Pass the same dataset_id, quality and apply_exclusions that "
-            "produced it, so the experiment is sized from the same population."
         )
 
 
@@ -180,11 +163,12 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
 
     @tool
     @_guarded
-    def check_data_quality(dataset_id: DatasetId, detector_params: DetectorParams | None = None) -> DataQualityReport:
+    def check_data_quality(dataset_id: DatasetId, detector_params: DetectorIn | None = None) -> DataQualityReport:
         """Flag days whose conversion or traffic is implausible (tracking breaks, outages), with linked incident events.
 
         Run this before blaming behaviour. The report's ``excluded_dates`` are what the other tools drop by default;
-        pass the whole report as ``quality`` to those tools to reuse exactly these exclusions. Deterministic.
+        pass the whole report as ``quality`` to those tools to reuse exactly these exclusions. A report is accepted only if
+        it reproduces on the dataset it is used with (it is recomputed with its own detector settings). Deterministic.
         """
         data = registry.load(dataset_id)
         return _check_data_quality(data.metrics, data.events, detector_params)
@@ -196,9 +180,9 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         pre_window: PreWindow,
         post_window: PostWindow,
         segment: Segment | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
-        detector_params: DetectorParams | None = None,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
         n_bootstrap: StrictInt = 2000,
         seed: StrictInt = 0,
         level: AlphaLevel = 0.95,
@@ -211,6 +195,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         ``seed``, so the same input gives the same interval. Deterministic.
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         return _confirm_change(
             data.metrics, pre_window.as_tuple(), post_window.as_tuple(), data.events, segment=segment, quality=quality,
             apply_exclusions=apply_exclusions, detector_params=detector_params, n_bootstrap=n_bootstrap, seed=seed, level=level,
@@ -223,10 +208,10 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         dataset_id: DatasetId,
         segment: Segment | None = None,
         search_window: DateWindow | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
-        detector_params: DetectorParams | None = None,
-        adjust_weekdays: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
+        adjust_weekdays: StrictBool = True,
         min_segment_days: StrictInt = 7,
         plausible_level: AlphaLevel = 0.95,
         alpha: AlphaLevel = 0.05,
@@ -239,6 +224,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         ``match_event_candidates``. Deterministic.
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         window = None if search_window is None else search_window.as_tuple()
         return _detect_change_point(
             data.metrics, data.events, segment=segment, search_window=window, quality=quality, apply_exclusions=apply_exclusions,
@@ -249,7 +235,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
 
     @tool
     @_guarded
-    def match_event_candidates(dataset_id: DatasetId, change_point: ChangePointResult, lead_days: StrictInt = 3) -> CandidateMatchResult:
+    def match_event_candidates(dataset_id: DatasetId, change_point: ChangePointIn, lead_days: StrictInt = 3) -> CandidateMatchResult:
         """Which logged events fall in, or up to ``lead_days`` before, the plausible onset range? Date coincidences only.
 
         A match is not evidence of cause; test it with ``test_candidates`` or ``test_event_scope``. Needs the dataset's
@@ -266,14 +252,14 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         pre_window: PreWindow,
         post_window: PostWindow,
         dimensions: tuple[str, ...] = DIMENSIONS,
-        include_pairs: bool = True,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
-        detector_params: DetectorParams | None = None,
+        include_pairs: StrictBool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
         alpha: AlphaLevel = 0.05,
         level: AlphaLevel = 0.95,
-        explain_threshold: float = 0.8,
-        max_localized_traffic_share: float = 0.5,
+        explain_threshold: StrictFloat = 0.8,
+        max_localized_traffic_share: StrictFloat = 0.5,
         fdr_family: Literal["scan", "partition"] = "scan",
         inference: Literal["day_level", "binomial"] = "day_level",
         min_days_per_window: StrictInt = 7,
@@ -283,6 +269,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         Describes where the change is concentrated, not why. Insufficient data is a normal result. Deterministic.
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         return _decompose_change(
             data.metrics, pre_window.as_tuple(), post_window.as_tuple(), data.events, dimensions=dimensions,
             include_pairs=include_pairs, quality=quality, apply_exclusions=apply_exclusions, detector_params=detector_params,
@@ -297,16 +284,16 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         pre_window: PreWindow,
         post_window: PostWindow,
         focal: SegmentSpec | None = None,
-        decomposition: DecompositionResult | None = None,
+        decomposition: DecompositionIn | None = None,
         candidates: list[str] | None = None,
-        expected_patterns: dict[str, ExpectedPattern] | None = None,
+        expected_patterns: dict[str, PatternIn] | None = None,
         lag_days: dict[str, StrictInt] | None = None,
         sensitivity_lags: tuple[StrictInt, ...] = (0, 1),
         alpha: AlphaLevel = 0.05,
         level: AlphaLevel = 0.95,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
-        detector_params: DetectorParams | None = None,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
         lead_days: StrictInt = 3,
         did_cov: Literal["cluster", "hc1"] = "hc1",
     ) -> CandidateTestingResult:
@@ -318,7 +305,9 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         """
         data = registry.load(dataset_id, events="required")
         assert data.events is not None
+        require_quality(quality, data)
         _require_same_windows(decomposition, pre_window, post_window)
+        require_decomposition(decomposition, data)
         return _test_candidates(
             data.metrics, data.events, pre_window.as_tuple(), post_window.as_tuple(), focal=focal, decomposition=decomposition,
             candidates=candidates, expected_patterns=expected_patterns, lag_days=lag_days, sensitivity_lags=sensitivity_lags,
@@ -334,16 +323,16 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         pre_window: PreWindow,
         post_window: PostWindow,
         focal: SegmentSpec | None = None,
-        decomposition: DecompositionResult | None = None,
+        decomposition: DecompositionIn | None = None,
         candidates: list[str] | None = None,
-        expected_patterns: dict[str, ExpectedPattern] | None = None,
+        expected_patterns: dict[str, PatternIn] | None = None,
         lag_days: dict[str, StrictInt] | None = None,
         sensitivity_lags: tuple[StrictInt, ...] = (0, 1),
         alpha: AlphaLevel = 0.05,
         level: AlphaLevel = 0.95,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
-        detector_params: DetectorParams | None = None,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
         lead_days: StrictInt = 3,
         did_cov: Literal["cluster", "hc1"] = "hc1",
     ) -> CandidateVerdict:
@@ -353,7 +342,9 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         """
         data = registry.load(dataset_id, events="required")
         assert data.events is not None
+        require_quality(quality, data)
         _require_same_windows(decomposition, pre_window, post_window)
+        require_decomposition(decomposition, data)
         return _test_event_scope(
             event, data.metrics, data.events, pre_window.as_tuple(), post_window.as_tuple(), focal=focal,
             decomposition=decomposition, candidates=candidates, expected_patterns=expected_patterns, lag_days=lag_days,
@@ -368,8 +359,8 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         focal: FocalSpec,
         event_date: date,
         comparison: SegmentSpec | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
         cov: Literal["cluster", "hc1"] = "hc1",
         weights: Literal["sessions", "none"] = "sessions",
         level: AlphaLevel = 0.95,
@@ -381,6 +372,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         in the result. Insufficient data or no valid comparison is a normal result (``status = "insufficient"``).
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         return _estimate_did(
             data.metrics, focal, event_date, comparison=comparison, events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, cov=cov, weights=weights, level=level,
@@ -393,13 +385,14 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         focal: FocalSpec,
         event_date: date,
         comparison: SegmentSpec | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
         cov: Literal["cluster", "hc1"] = "hc1",
         weights: Literal["sessions", "none"] = "sessions",
     ) -> PreTrendResult:
         """Was the focal population already trending away from the comparison before ``event_date``? Slope per day, in pp."""
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         return _check_pre_trends(
             data.metrics, focal, event_date, comparison=comparison, events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, cov=cov, weights=weights,
@@ -412,8 +405,8 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         focal: FocalSpec,
         event_date: date,
         comparison: SegmentSpec | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
         cov: Literal["cluster", "hc1"] = "hc1",
         weights: Literal["sessions", "none"] = "sessions",
         dates: list[date] | None = None,
@@ -424,6 +417,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         ``not_evaluable``; it is never counted as passed.
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         return _run_placebo(
             data.metrics, focal, event_date, comparison=comparison, events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, cov=cov, weights=weights, dates=dates,
@@ -433,33 +427,34 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     @_guarded
     def project_impact(
         dataset_id: DatasetId,
-        did: DidResult,
+        did: DidIn,
         focal: FocalSpec,
         comparison: SegmentSpec | None = None,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
     ) -> ImpactResult:
         """Scale a DiD result to the overall conversion rate (pp) and to orders over the post period, with intervals.
 
-        The population is rebuilt from ``dataset_id``, ``focal``, ``comparison``, ``quality`` and ``apply_exclusions``,
-        which must be the ones that produced ``did``. The call fails, naming the difference, if the rebuilt population
-        does not match the DiD result's days, exclusions and session counts.
+        The population is rebuilt from ``dataset_id``, ``focal``, ``comparison``, ``quality`` and ``apply_exclusions``, and
+        the DiD is recomputed on it at the result's own event date, ``cov``, ``weights`` and level. The call is refused,
+        naming the fields that differ, unless the supplied ``did`` reproduces. The values returned are the analytics' own.
         """
         data = registry.load(dataset_id)
+        require_quality(quality, data)
         panel = _build_panel(
             data.metrics, focal, comparison=comparison, events=data.events, quality=quality, apply_exclusions=apply_exclusions
         )
-        _require_same_population(did, panel)
+        require_did(did, panel)
         return _project_impact(did, panel)
 
     @tool
     @_guarded
     def power_analysis(
-        baseline: float,
-        mde_pp: float,
+        baseline: StrictFloat,
+        mde_pp: StrictFloat,
         alpha: AlphaLevel = 0.05,
         power: AlphaLevel = 0.8,
-        allocation_ratio: float = 1.0,
+        allocation_ratio: StrictFloat = 1.0,
         n_comparisons: StrictInt = 1,
     ) -> PowerResult:
         """Sessions per arm for a two-proportion test. Needs no dataset.
@@ -476,26 +471,28 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     @_guarded
     def design_experiment(
         dataset_id: DatasetId,
-        candidate_testing: CandidateTestingResult,
+        candidate_testing: CandidateTestingIn,
         post_window: PostWindow,
-        quality: DataQualityReport | None = None,
-        apply_exclusions: bool = True,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
         target_candidate: str | None = None,
         arms: Literal["leading", "each_candidate"] = "leading",
-        mde_pp: float | None = None,
+        mde_pp: StrictFloat | None = None,
         alpha: AlphaLevel = 0.05,
         power: AlphaLevel = 0.8,
-        allocation_ratio: float = 1.0,
+        allocation_ratio: StrictFloat = 1.0,
     ) -> ExperimentDesign:
         """A randomized rollback experiment sized from the observed focal traffic. A planning aid, not a causal claim.
 
         The population is the focal segment in ``candidate_testing``; the baseline and daily traffic come from
-        ``dataset_id`` over ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing.
-        Pass the ``dataset_id``, ``quality`` and ``apply_exclusions`` that produced ``candidate_testing``; the call fails
-        if the rebuilt population removes different days.
+        ``dataset_id`` over ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing. The
+        candidate-testing result must reproduce on this dataset (its exclusions, stored DiD and impact, and timing
+        analysis are recomputed and compared), so pass the ``dataset_id``, ``quality`` and ``apply_exclusions`` that
+        produced it; otherwise the call is refused and names the fields that differ.
         """
         data = registry.load(dataset_id)
-        _require_same_exclusions(candidate_testing, data, quality, apply_exclusions)
+        require_quality(quality, data)
+        require_candidate_result(candidate_testing, data, quality, apply_exclusions)
         return _design_experiment(
             data.metrics, candidate_testing, post_window.as_tuple(), events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, target_candidate=target_candidate, arms=arms, mde_pp=mde_pp, alpha=alpha,
