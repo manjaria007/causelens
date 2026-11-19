@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from mcp_reference import reference_files
 from mcp_support import McpSession, error_text, serve, structured
-from mcp_variants import plain, rising, twin
+from mcp_variants import plain, rising, swapped, twin
 from scenarios import CHECKOUT
 
 import causelens.analytics as A
@@ -45,7 +45,7 @@ def world(tmp_path_factory):
     metrics_file, events_file = reference_files(tmp_path_factory)
     base = load_metrics(metrics_file)
     out = tmp_path_factory.mktemp("variants")
-    frames = {"reference": base, "rising": rising(base), "twin": twin(base), "plain": plain(base)}
+    frames = {"reference": base, "rising": rising(base), "twin": twin(base), "plain": plain(base), "swapped": swapped(base)}
     configs = []
     for name, frame in frames.items():
         path = metrics_file if name == "reference" else out / f"{name}.csv"
@@ -421,3 +421,166 @@ def test_a_malformed_events_value_exits_2_on_the_command_line(scratch, capsys):
     assert main(["--transport", "stdio", "--config", str(cfg)]) == 2
     out, err = capsys.readouterr()
     assert out == "" and "events" in err
+
+
+# ====================================================================================================================
+# Round 2 of the PR #7 review (commit f71024a): per-segment decomposition counts, the interval level, ISO dates
+# ====================================================================================================================
+
+
+@pytest.fixture(scope="module")
+def swap(world):
+    return pipeline(world["frames"]["swapped"], world["events"])
+
+
+# ------------------------------------------------------------------ 5. a decomposition is bound to its segments, not only its totals
+
+
+def test_the_swapped_variant_has_the_same_window_totals_but_a_different_segment(ref, swap):
+    for window_name in ("pre", "post"):
+        a, b = getattr(ref["dec"], window_name), getattr(swap["dec"], window_name)
+        assert (a.sessions, a.orders, a.excluded_dates) == (b.sessions, b.orders, b.excluded_dates)
+    assert ref["dec"].localization.segments == ["device=mobile, browser=safari"]
+    assert swap["dec"].localization.segments == ["device=desktop, browser=chrome"]
+
+
+@pytest.mark.parametrize("tool, extra", [("test_candidates", {}), ("test_event_scope", {"event": CHECKOUT})])
+def test_a_stale_decomposition_with_the_same_totals_is_refused(mcp, ref, swap, tool, extra):
+    base = {"dataset_id": "swapped", "pre_window": window(PRE), "post_window": window(POST), "quality": as_json(swap["q"]), **extra}
+    text = error_text(mcp.call(tool, {**base, "decomposition": as_json(ref["dec"])}))
+    assert "decomposition was not computed on this dataset" in text and "device=mobile" in text
+    fresh = mcp.call(tool, {**base, "decomposition": as_json(swap["dec"])})
+    assert not fresh.is_error
+    if tool == "test_candidates":
+        assert structured(fresh)["focal"]["label"] == "device=desktop, browser=chrome" and structured(fresh)["status"] == "ok"
+
+
+def test_the_stale_decomposition_used_to_investigate_the_wrong_segment(world, ref, swap):
+    """What the old totals-only check let through, from the direct analytics (the adapter now refuses it)."""
+    frame, events = world["frames"]["swapped"], world["events"]
+    wrong = A.test_candidates(frame, events, PRE, POST, decomposition=ref["dec"], quality=swap["q"])
+    assert wrong.status == "no_candidates" and wrong.focal.label == "device=mobile, browser=safari"
+    assert swap["tc"].status == "ok" and swap["tc"].focal.label == "device=desktop, browser=chrome"
+
+
+@pytest.mark.parametrize("edit, expect", [
+    (lambda d: d["partitions"][0]["segments"][0].update(orders_post=d["partitions"][0]["segments"][0]["orders_post"] + 1), "orders"),
+    (lambda d: d["partitions"][0]["segments"][0].update(sessions_pre=d["partitions"][0]["segments"][0]["sessions_pre"] - 1), "sessions"),
+    (lambda d: d["partitions"][1]["segments"].pop(), "missing from the result"),
+    (lambda d: d["partitions"][0]["segments"][0]["labels"].update(device="toaster"), "this dataset gives 0"),
+])
+def test_an_edited_decomposition_segment_is_refused(mcp, ref, edit, expect):
+    dec = copy.deepcopy(as_json(ref["dec"]))
+    edit(dec)
+    args = {"dataset_id": "reference", "pre_window": window(PRE), "post_window": window(POST), "decomposition": dec, "quality": as_json(ref["q"])}
+    assert expect in error_text(mcp.call("test_candidates", args))
+
+
+def test_every_partition_of_a_matching_decomposition_is_checked_and_accepted(mcp, ref):
+    """All ten partitions (singles and pairs) of the reference decomposition reproduce, so it is accepted unchanged."""
+    assert len(ref["dec"].partitions) == 10
+    args = {"dataset_id": "reference", "pre_window": window(PRE), "post_window": window(POST), "decomposition": as_json(ref["dec"]), "quality": as_json(ref["q"])}
+    assert structured(mcp.call("test_candidates", args)) == as_json(ref["tc"])
+
+
+def test_a_decomposition_over_a_subset_of_dimensions_is_checked_too(mcp, world, ref):
+    frame, events = world["frames"]["reference"], world["events"]
+    small = A.decompose_change(frame, PRE, POST, events, quality=ref["q"], dimensions=("device", "browser"), include_pairs=False)
+    args = {"dataset_id": "reference", "pre_window": window(PRE), "post_window": window(POST), "decomposition": as_json(small), "quality": as_json(ref["q"])}
+    assert not mcp.call("test_candidates", args).is_error
+    bad = copy.deepcopy(as_json(small))
+    bad["partitions"][1]["segments"][0]["orders_pre"] += 5
+    assert "orders" in error_text(mcp.call("test_candidates", {**args, "decomposition": bad}))
+
+
+# ------------------------------------------------------------------ 6. the interval level is recovered from what the result stores
+
+
+@pytest.mark.parametrize("level", [0.8, 0.9, 0.99])
+def test_a_candidate_result_made_at_another_level_is_accepted_unchanged(mcp, world, ref, level):
+    frame, events = world["frames"]["reference"], world["events"]
+    tc = A.test_candidates(frame, events, PRE, POST, decomposition=ref["dec"], quality=ref["q"], level=level)
+    args = {"dataset_id": "reference", "candidate_testing": as_json(tc), "post_window": window(POST), "quality": as_json(ref["q"])}
+    result = mcp.call("design_experiment", args)
+    assert not result.is_error, error_text(result) if result.is_error else ""
+    assert structured(result) == as_json(A.design_experiment(frame, tc, POST, events=events, quality=ref["q"]))
+
+
+def test_a_90_percent_result_with_no_interval_to_read_the_level_from_is_accepted(mcp, world, ref):
+    """Every onset is past the data, so no step, share interval or DiD exists. The level survives only in each share set."""
+    frame, events = world["frames"]["reference"], world["events"]
+    tc = A.test_candidates(frame, events, PRE, POST, decomposition=ref["dec"], quality=ref["q"], level=0.9,
+                           lag_days={"Homepage hero refresh": 400, CHECKOUT: 400})
+    assert tc.status == "ok" and tc.timing is not None and tc.timing.status == "not_evaluable"
+    assert tc.timing.total_step_pp is None and all(c.timing.step_pp is None for c in tc.candidates)
+    assert {c.share_set.level for c in tc.timing.candidates.values()} == {0.9}
+    args = {"dataset_id": "reference", "candidate_testing": as_json(tc), "post_window": window(POST), "quality": as_json(ref["q"])}
+    result = mcp.call("design_experiment", args)
+    assert not result.is_error, error_text(result) if result.is_error else ""
+    assert structured(result) == as_json(A.design_experiment(frame, tc, POST, events=events, quality=ref["q"]))
+
+
+def test_a_result_whose_stored_level_was_edited_is_still_refused(mcp, ref):
+    tc = copy.deepcopy(as_json(ref["tc"]))
+    for cand in tc["timing"]["candidates"].values():
+        cand["share_set"]["level"] = 0.5
+    text = error_text(mcp.call("design_experiment", {"dataset_id": "reference", "candidate_testing": tc, "post_window": window(POST), "quality": as_json(ref["q"])}))
+    assert "was not computed on this dataset" in text and "level" in text
+
+
+# ------------------------------------------------------------------ 7. dates are ISO strings, never timestamps
+
+BAD_DATES = [0, "0", 86400, "86400", True, 1.5, "2026-10-14T00:00:00", "20261014", "2026-10-14 ", "2026-02-30", "2026-13-01", "10/14/2026", "", None]
+
+
+@pytest.mark.parametrize("bad", BAD_DATES, ids=[repr(b) for b in BAD_DATES])
+def test_a_bare_date_argument_must_be_an_iso_date_string(mcp, bad):
+    args = {"dataset_id": "reference", "focal": FOCAL, "event_date": bad}
+    for tool in ("estimate_did", "check_pre_trends", "run_placebo"):
+        text = error_text(mcp.call(tool, args))
+        assert "event_date" in text, (tool, bad, text[:200])
+
+
+@pytest.mark.parametrize("bad", [0, "0", 86400, "86400", True, "2026-10-14T00:00:00", "20261014"], ids=repr)
+def test_a_window_date_must_be_an_iso_date_string(mcp, bad):
+    for key in ("start", "end"):
+        window_bad = {"start": "2026-08-01", "end": "2026-10-13", key: bad}
+        text = error_text(mcp.call("confirm_change", {"dataset_id": "reference", "pre_window": window_bad, "post_window": window(POST)}))
+        assert key in text, (key, bad, text[:200])
+    text = error_text(mcp.call("detect_change_point", {"dataset_id": "reference", "search_window": {"start": bad, "end": "2026-10-31"}}))
+    assert "start" in text
+
+
+def test_a_placebo_date_list_must_hold_iso_date_strings(mcp):
+    for bad in (0, "0", 86400, "2026-09-05T00:00:00"):
+        text = error_text(mcp.call("run_placebo", {"dataset_id": "reference", "focal": FOCAL, "event_date": "2026-10-14", "dates": ["2026-09-05", bad]}))
+        assert "dates" in text, bad
+    assert not mcp.call("run_placebo", {"dataset_id": "reference", "focal": FOCAL, "event_date": "2026-10-14", "dates": ["2026-09-05", "2026-09-25"]}).is_error
+
+
+def test_a_timestamp_no_longer_becomes_the_epoch_date(mcp):
+    """Before: event_date 0 and "0" ran as 1970-01-01, and a window starting at 0 spanned 20,727 days."""
+    for bad in (0, "0"):
+        assert mcp.call("estimate_did", {"dataset_id": "reference", "focal": FOCAL, "event_date": bad}).is_error
+    r = mcp.call("confirm_change", {"dataset_id": "reference", "pre_window": {"start": 0, "end": "2026-10-13"}, "post_window": window(POST)})
+    assert r.is_error
+
+
+def test_dates_inside_prior_results_are_strict_too(mcp, ref):
+    q = copy.deepcopy(as_json(ref["q"]))
+    q["date_range"] = ["0", "0"]
+    assert "date_range" in error_text(mcp.call("estimate_did", {"dataset_id": "reference", "focal": FOCAL, "event_date": "2026-10-14", "quality": q}))
+    q["date_range"] = [0, 86400]
+    assert "date_range" in error_text(mcp.call("estimate_did", {"dataset_id": "reference", "focal": FOCAL, "event_date": "2026-10-14", "quality": q}))
+    dec = copy.deepcopy(as_json(ref["dec"]))
+    dec["pre"]["start"] = 0
+    args = {"dataset_id": "reference", "pre_window": window(PRE), "post_window": window(POST), "decomposition": dec}
+    assert "start" in error_text(mcp.call("test_candidates", args))
+
+
+def test_honest_iso_dates_still_work_and_the_schema_says_date(mcp):
+    ok = structured(mcp.call("estimate_did", {"dataset_id": "reference", "focal": FOCAL, "event_date": "2026-10-14"}))
+    assert ok["status"] == "ok" and ok["event_date"] == "2026-10-14"
+    tools = {t.name: t for t in mcp.list_tools().tools}
+    assert tools["estimate_did"].input_schema["properties"]["event_date"]["format"] == "date"
+    assert tools["confirm_change"].input_schema["$defs"]["DateWindow"]["properties"]["start"]["format"] == "date"

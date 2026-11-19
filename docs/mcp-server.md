@@ -137,7 +137,10 @@ design (`normal_approx_power`, `two_proportion_test`, `benjamini_hochberg`, the 
   `false`, which changes what a call means (`mde_pp: true` was a 1 pp effect). Numbers must be JSON numbers (an integer is
   fine for a float), integers must be integers (`1.5`, `true` and `"5"` are rejected, never rounded), and flags must be
   `true` or `false`. Typed model arguments (`quality`, `detector_params`, `decomposition`, `candidate_testing`, `did`,
-  `expected_patterns`) are re-validated as strict JSON, so the same holds inside them. Dates are ISO strings.
+  `expected_patterns`) are re-validated as strict JSON, so the same holds inside them.
+* **Dates are ISO strings, `YYYY-MM-DD`, and nothing else.** The SDK's lax parsing reads `0` and `"86400"` as Unix timestamps
+  (`event_date: 0` and `"0"` ran as 1970-01-01, and a window starting at `0` became a window starting on 1970-01-01) and `"2026-10-14T00:00:00"` as a date.
+  All of those are refused, for bare date arguments, window ends and the dates inside prior results.
 * **Seeds.** `confirm_change` has `seed` and `n_bootstrap`; the same seed gives the same interval. Every other tool is
   deterministic without one.
 * **Prior results are typed models.** Pass a tool's `structuredContent` unchanged as the matching argument of the next
@@ -166,8 +169,8 @@ altered; an accepted result is passed to the analytics unchanged.
 |---|---|---|
 | `quality` | every tool that takes it | `check_data_quality` on the dataset with the report's own `params`. A hand-edited report is refused; change exclusions with `detector_params` or `apply_exclusions=false` instead. |
 | `did` | `project_impact` | the DiD on the rebuilt population at the result's event date, `cov`, `weights` and level. |
-| `candidate_testing` | `design_experiment` | the exclusions, every stored DiD and impact, and the joint timing analysis at the declared onsets (the series the candidate test used). |
-| `decomposition` | `test_candidates`, `test_event_scope` | each window's sessions and orders after the window's own excluded days; also the windows must equal the windows given. |
+| `candidate_testing` | `design_experiment` | the exclusions, every stored DiD and impact, and the joint timing analysis at the declared onsets (the series the candidate test used), at the interval level the result was made at. That level is read from the stored intervals, or from the share sets, which record it even when nothing was estimable. |
+| `decomposition` | `test_candidates`, `test_event_scope` | each window's totals **and** the sessions and orders of every segment of every partition it lists, after the window's own excluded days, with no segment missing; the windows must also equal the windows given. Totals alone are not enough: moving orders between mobile and desktop leaves them unchanged and points the localization at the wrong segment. |
 
 Limits. A change point (`match_event_candidates`) is not checked: it records too few of its settings to recompute
 faithfully, and the tool only joins its dates to the event log. A result is checked on what it stores, so a
@@ -181,25 +184,27 @@ data, including loading the files, running the analytics and serializing the res
 
 | Tool | median ms | max ms | response KB |
 |---|---|---|---|
-| `list_datasets` | 47 | 57 | 0.6 |
-| `check_data_quality` | 168 | 250 | 7.9 |
-| `confirm_change` | 202 | 287 | 3.3 |
-| `detect_change_point` | 199 | 305 | 2.5 |
-| `match_event_candidates` | 48 | 57 | 1.3 |
-| `decompose_change` | 306 | 394 | 164.0 |
-| `test_candidates` (no prior results) | 494 | 564 | 16.6 |
-| `test_candidates` (decomposition and quality passed) | 408 | 498 | 16.6 |
-| `test_event_scope` | 501 | 556 | 6.5 |
-| `estimate_did` | 269 | 357 | 1.0 |
-| `check_pre_trends` | 229 | 319 | 0.3 |
-| `run_placebo` | 279 | 379 | 0.9 |
-| `project_impact` | 273 | 367 | 0.9 |
-| `power_analysis` | 7 | 7 | 1.0 |
-| `design_experiment` | 380 | 480 | 10.5 |
+| `list_datasets` | 50 | 62 | 0.6 |
+| `check_data_quality` | 178 | 284 | 7.9 |
+| `confirm_change` | 214 | 323 | 3.3 |
+| `detect_change_point` | 213 | 302 | 2.5 |
+| `match_event_candidates` | 51 | 60 | 1.3 |
+| `decompose_change` | 318 | 408 | 164.0 |
+| `test_candidates` (no prior results) | 525 | 574 | 16.6 |
+| `test_candidates` (decomposition and quality passed) | 448 | 539 | 16.6 |
+| `test_event_scope` | 481 | 661 | 6.5 |
+| `estimate_did` | 272 | 377 | 1.0 |
+| `check_pre_trends` | 233 | 333 | 0.3 |
+| `run_placebo` | 281 | 359 | 0.9 |
+| `project_impact` | 272 | 365 | 0.9 |
+| `power_analysis` | 7 | 8 | 1.0 |
+| `design_experiment` | 387 | 483 | 10.5 |
 
-The slowest call is 564 ms (re-measured after the binding checks were added). A new connection (initialize) takes about
-33 ms, and a cold connection plus the heaviest call 735 ms. `tests/test_mcp_server.py` asserts every tool stays under 2 seconds (3 repeats each) and that a cold connection
-plus `test_candidates` does too.
+The slowest call is 661 ms (re-measured after the binding checks and the per-segment decomposition check were added; runs vary
+by about 10%). A new connection (initialize) takes about 35 ms, and a cold connection plus the heaviest call 653 ms. `tests/test_mcp_server.py` asserts that the median of five calls to every tool is under 2 seconds (and no call over 6 s),
+and the same for a cold connection plus `test_candidates`. A wall-clock limit on a shared machine otherwise tests the
+machine: with the one core shared with three busy loops, the heaviest tool's slowest call crossed 2 s while its median stayed
+within the limit, so the earlier max-of-three assertion could fail under load without any change to the code.
 
 Two sizes to know about: `tools/list` is about 270 KB of JSON Schema (the tools that accept prior results embed those
 models, 9 to 31 KB of input schema each), and `decompose_change` returns about 164 KB because it lists every segment. Agents that load all
@@ -222,15 +227,16 @@ answer key behind a link, malformed configuration):
 * **Determinism** across repeated calls and across a fresh server instance; seeds are passed through.
 * **Binding.** Variants of the reference data (`tests/mcp_variants.py`) with the same sessions but the opposite effect, two
   equal-sized populations, and no outage: a result from one is refused for another, an edited result is refused field by
-  field, a stale quality report is refused by every tool that takes one, and a matching result is returned unchanged.
-* **Strict values.** `true`, `"0.5"`, `"false"`, `1.0` for an integer, and bad values inside nested models are each
-  refused, and a JSON integer is still accepted for a float.
+  field, a stale quality report is refused by every tool that takes one, a decomposition with the same totals but different segments is
+  refused, results made at 80%, 90% and 99% are accepted unchanged, and a matching result is returned unchanged.
+* **Strict values.** `true`, `"0.5"`, `"false"`, `1.0` for an integer, timestamps and datetime strings for dates, and bad
+  values inside nested models are each refused, and a JSON integer is still accepted for a float.
 * **Insufficient data and invalid input**: results versus errors, with the messages checked.
 * **Read-only, no answer key, no network.** An audit hook records every file open and socket connect during all tools:
   `ground_truth.json` (which sits in the same directory) is never opened, nothing under the data directory is opened for
   writing, the data files' hashes and modification times are unchanged, and the only connections are to loopback. A
   configuration that names a file called `ground_truth*` is rejected at startup.
-* **Mutation checks.** The adapter was mutated 13 ways in the first round and 11 more after the review (each binding check
+* **Mutation checks.** The adapter was mutated 13 ways in the first round, 11 more after the first review and 7 more after the second (each binding check
   disabled, `quality` unchecked in one tool, the decomposition check removed, a lax `mde_pp`, lax nested models, the
   hard-link check removed, a non-string `events` dropped silently, the resolved path not kept). Each is caught by a named
   test, with one exception: removing the check of the resolved target's name changes nothing, because the identity check

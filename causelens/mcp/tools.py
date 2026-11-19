@@ -16,7 +16,6 @@ schema from the real annotations.
 """
 import functools
 from collections.abc import Callable
-from datetime import date
 from typing import Literal, ParamSpec, TypeVar
 
 from mcp.server.mcpserver import MCPServer
@@ -61,6 +60,7 @@ from causelens.mcp.models import (
     DatasetId,
     DateWindow,
     FocalSpec,
+    IsoDate,
     PostWindow,
     PreWindow,
     Segment,
@@ -357,7 +357,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     def estimate_did(
         dataset_id: DatasetId,
         focal: FocalSpec,
-        event_date: date,
+        event_date: IsoDate,
         comparison: SegmentSpec | None = None,
         quality: QualityIn | None = None,
         apply_exclusions: StrictBool = True,
@@ -383,7 +383,7 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     def check_pre_trends(
         dataset_id: DatasetId,
         focal: FocalSpec,
-        event_date: date,
+        event_date: IsoDate,
         comparison: SegmentSpec | None = None,
         quality: QualityIn | None = None,
         apply_exclusions: StrictBool = True,
@@ -403,13 +403,13 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     def run_placebo(
         dataset_id: DatasetId,
         focal: FocalSpec,
-        event_date: date,
+        event_date: IsoDate,
         comparison: SegmentSpec | None = None,
         quality: QualityIn | None = None,
         apply_exclusions: StrictBool = True,
         cov: Literal["cluster", "hc1"] = "hc1",
         weights: Literal["sessions", "none"] = "sessions",
-        dates: list[date] | None = None,
+        dates: list[IsoDate] | None = None,
     ) -> PlaceboResult:
         """DiD at fake event dates inside the pre-period. A real-looking effect there is evidence against the design.
 

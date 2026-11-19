@@ -525,3 +525,40 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   tools, answers `power_analysis` (8,158 per arm), refuses `mde_pp: true`, and exits 0 with nothing on stderr. That is not a
   Kiro call. The steps to verify one are in `docs/mcp-server.md` ("Verify an actual Kiro tool call"). Do not start Task 8
   until that has been done and recorded here.
+
+### Task 7 review round 2 (PR #7, review of `f71024a`)
+
+- Three findings, each reproduced with a failing test before any fix (20 of the 39 new tests failed on `f71024a`; the rest
+  are controls). One more thing the review reported was not a code defect: two timing tests failed under load and passed alone.
+  1. **A decomposition was bound by its window totals only.** That was my design, and it was not enough. `mcp_variants.swapped`
+     moves the planted effect from mobile/safari to desktop/chrome and keeps every window's total sessions and orders. A
+     decomposition of the reference data was accepted for it, `test_candidates` investigated mobile/safari and returned
+     `no_candidates`, where the right decomposition localizes to desktop/chrome and finds Checkout supported. Now every
+     segment of every partition the decomposition lists is recomputed (sessions and orders, both windows, after the window's own
+     excluded days), and a segment that the data have but the result lacks is reported. On the reference data all 71 segments of
+     the ten partitions reproduce exactly before the check was written.
+  2. **A valid 90% result was refused when it stored no interval.** `_timing_level` fell back to 95% when the total step, every
+     candidate step and every DiD were absent. I reproduced it with every onset past the data (`lag_days` of 400), which leaves
+     nothing estimable. Every share set records the level even then, so the level is read from there, and 80%, 90% and 99% results
+     are now accepted unchanged.
+  3. **Dates were still lax.** Pydantic reads `0` and `"86400"` as Unix timestamps. Checked on `f71024a`: `event_date` 0 and "0" ran
+     as 1970-01-01, and a window starting at 0 returned an `ok` result that began on 1970-01-01. `"2026-10-14T00:00:00"` was
+     accepted as a date. Dates in tool arguments (bare dates, `DateWindow`, the placebo list) are now `YYYY-MM-DD` strings only
+     (`IsoDate`). Dates inside prior-result models were already strict JSON and are tested.
+- Timing tests. The assertion "max of three calls under 2 s" is a test of the machine as much as of the code. With one core shared
+  with three busy loops it failed on `test_candidates` on my machine too (the median was inside the limit). It is now the median of
+  five calls under 2 s plus a 6 s hang guard, and the same for a cold connection plus `test_candidates` (median of three). The
+  same contention now passes; pinned to a single core without competition the old assertion also passed, so this is about noise,
+  not a speed-up. Typical latency is unchanged: the slowest call is 661 ms and a cold connection plus `test_candidates` 653 ms.
+- Mistakes of mine: the first version of the new decomposition check indexed a pandas table with a mobile key that did not match a
+  single-dimension index (a crash, `Error executing tool`), found by the first test run and rewritten with plain dictionaries; and a
+  test expected the word "toaster" in an error that lists segment labels from the result, not the edited dimension, so it now
+  checks the count the data give. Docs had a "20,727 days" figure taken from the review; I could not reproduce that number (the
+  window is about 20,740 days inclusive), so the docs no longer state one.
+- Mutation checks (7): per-segment check off, level fallback only, `event_date` lax, `DateWindow` lax, placebo dates lax, missing
+  segments not reported, level always 95%. All caught by named tests.
+- Results: `.venv/bin/python -m pytest -q` passed (1,032 tests, 377 s, none skipped) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP block is 262 tests.
+- Order of work: failing regressions on `f71024a`, the three fixes, the review file, the whole MCP block, then the full suite once.
+  No analytics code changed.
+- **Kiro tool call: still not verified.** Unchanged from the previous round; Task 8 stays pending until it is.

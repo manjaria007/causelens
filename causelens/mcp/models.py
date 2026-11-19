@@ -5,6 +5,7 @@ tool accepts, is an existing ``causelens.analytics`` model, so the published sch
 code and cannot drift from it.
 """
 import json
+import re
 from datetime import date
 from typing import Annotated, TypeVar
 
@@ -24,6 +25,7 @@ __all__ = [
     "DatasetId",
     "DateWindow",
     "FocalSpec",
+    "IsoDate",
     "PostWindow",
     "PreWindow",
     "Segment",
@@ -66,13 +68,32 @@ def strictly(model: type[M]) -> type[M]:
     return Annotated[model, BeforeValidator(_StrictJson(model))]  # type: ignore[return-value]
 
 
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _iso_date_only(value: object) -> date:
+    """A calendar date is ``YYYY-MM-DD``. Pydantic's lax parsing also reads ``0`` and ``"86400"`` as Unix timestamps
+    (1970-01-01 and 1970-01-02) and ``"2026-10-14T00:00:00"`` as a date; those change what a call means, so they are refused."""
+    if type(value) is date:
+        return value
+    if isinstance(value, str) and _ISO_DATE.fullmatch(value):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"{value!r} is not a real calendar date") from None
+    raise ValueError(f"a date must be an ISO date string YYYY-MM-DD, got {value!r}")
+
+
+IsoDate = Annotated[date, BeforeValidator(_iso_date_only), Field(description="An ISO calendar date, YYYY-MM-DD.")]
+
+
 class DateWindow(BaseModel):
     """A calendar window. Both ends are inclusive and are ISO dates (``YYYY-MM-DD``)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    start: date = Field(description="First day of the window (inclusive).")
-    end: date = Field(description="Last day of the window (inclusive).")
+    start: IsoDate = Field(description="First day of the window (inclusive), YYYY-MM-DD.")
+    end: IsoDate = Field(description="Last day of the window (inclusive), YYYY-MM-DD.")
 
     def as_tuple(self) -> tuple[date, date]:
         return (self.start, self.end)

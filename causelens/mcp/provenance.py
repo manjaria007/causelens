@@ -10,7 +10,8 @@ supplied result to equal the recomputation (floats to a relative 1e-9).
 * DiD result: ``did_on_panel`` at its event date with its own ``cov``, ``weights`` and interval level.
 * candidate-testing result: the exclusions, every stored DiD and impact, and the joint timing analysis at the declared
   onsets (the same series the candidate test used).
-* decomposition: its window totals (sessions and orders after its own excluded days).
+* decomposition: for every partition and segment it lists, the sessions and orders of each window after the window's own
+  excluded days (not only the window totals, which two different segmentations can share), and no segment may be missing.
 
 This only refuses. It never changes a value. A result that cannot be reproduced from the stated inputs is refused with the
 fields that differ. Two limits: a change point is not checked (it records too few of its settings to recompute faithfully,
@@ -108,12 +109,32 @@ def require_did(did: DidResult, panel: Panel) -> None:
         )
 
 
+def _segment_key(labels: dict[str, str], dimensions: list[str]) -> tuple[str, ...]:
+    return tuple(str(labels.get(d, "")) for d in dimensions)
+
+
+def _table(frame: pd.DataFrame, dims: list[str]) -> dict[tuple[str, ...], tuple[int, int]]:
+    """(sessions, orders) per segment, keyed by the tuple of dimension values."""
+    grouped = frame.groupby(dims)[["sessions", "orders"]].sum()
+    out: dict[tuple[str, ...], tuple[int, int]] = {}
+    for key, sessions, orders in zip(grouped.index, grouped["sessions"], grouped["orders"], strict=True):
+        parts = key if isinstance(key, tuple) else (key,)
+        out[tuple(str(p) for p in parts)] = (int(sessions), int(orders))
+    return out
+
+
 def require_decomposition(decomposition: DecompositionResult | None, data: LoadedDataset) -> None:
-    """Each window's sessions and orders must match this dataset after the window's own excluded days."""
+    """Every segment's sessions and orders in each window must match this dataset, after the window's own excluded days.
+
+    Window totals alone are not enough: moving orders between segments leaves every total unchanged and still points a
+    localization at the wrong segment. So each listed segment of each partition is recomputed, and a segment that the data
+    have but the result lacks is reported.
+    """
     if decomposition is None or decomposition.status != "ok":
         return
     days = data.metrics["date"]
     diffs: list[str] = []
+    grouped: dict[str, pd.DataFrame] = {}
     for window in (decomposition.pre, decomposition.post):
         excluded = pd.to_datetime(list(window.excluded_dates))
         rows = (days >= pd.Timestamp(window.start)) & (days <= pd.Timestamp(window.end)) & ~days.isin(excluded)
@@ -121,11 +142,46 @@ def require_decomposition(decomposition: DecompositionResult | None, data: Loade
             have = int(data.metrics.loc[rows, field].sum())
             if have != getattr(window, field):
                 diffs.append(f"{window.name} window {field}: supplied {getattr(window, field):,}, this dataset gives {have:,}")
+        grouped[window.name] = data.metrics.loc[rows]
+    for partition in decomposition.partitions:
+        dims = list(partition.dimensions)
+        if not all(d in data.metrics.columns for d in dims):
+            diffs.append(f"partition {partition.name}: unknown dimension in {dims}")
+            continue
+        counts = {name: _table(frame, dims) for name, frame in grouped.items()}
+        listed = set()
+        for seg in partition.segments:
+            key = _segment_key(seg.labels, dims)
+            listed.add(key)
+            for window_name, field, supplied in (
+                ("pre", "sessions", seg.sessions_pre), ("post", "sessions", seg.sessions_post),
+                ("pre", "orders", seg.orders_pre), ("post", "orders", seg.orders_post),
+            ):
+                have = counts[window_name].get(key, (0, 0))[0 if field == "sessions" else 1]
+                if have != supplied:
+                    diffs.append(f"{seg.label} ({partition.name}) {window_name} {field}: supplied {supplied:,}, this dataset gives {have:,}")
+        for window_name, table in counts.items():
+            for key, (sessions, orders) in table.items():
+                if key not in listed and (sessions > 0 or orders > 0):
+                    label = ", ".join(f"{d}={v}" for d, v in zip(dims, key, strict=True))
+                    diffs.append(f"{label} ({partition.name}) has traffic in this dataset's {window_name} window but is missing from the result")
+        if len(diffs) > 4 * MAX_REPORTED:
+            break
     if diffs:
         raise ToolError(
-            f"The decomposition was not computed on this dataset ({_listing(diffs)}). Pass the dataset_id, windows and "
-            "quality that produced it."
+            f"The decomposition was not computed on this dataset ({_listing(sorted(set(diffs), key=diffs.index))}). Pass the "
+            "dataset_id, windows and quality that produced it."
         )
+
+
+def _timing_level(result: CandidateTestingResult) -> float:
+    """The interval level the result was made at. Every share set records it, even when nothing was estimable (no step, no
+    total, no DiD), so a 90% result with no interval to read still reproduces. 95% only if nothing at all carries a level."""
+    timing = result.timing
+    assert timing is not None
+    levels = [iv.level for iv in (timing.total_step_pp, *(c.timing.step_pp for c in result.candidates if c.timing is not None)) if iv is not None]
+    levels += [c.share_set.level for c in timing.candidates.values()]
+    return levels[0] if levels else 0.95
 
 
 def require_candidate_result(
@@ -149,8 +205,7 @@ def require_candidate_result(
         if cand.impact is not None:
             diffs += _compare(project_impact(expected, panel), cand.impact, f"candidates[{i}].impact")
     if result.timing is not None and result.candidates:
-        intervals = [result.timing.total_step_pp, *(c.timing.step_pp for c in result.candidates if c.timing is not None)]
-        level = next((iv.level for iv in intervals if iv is not None), 0.95)
+        level = _timing_level(result)
         usable = panel.usable_days
         series = panel.daily.loc[usable, "diff_pp"].to_numpy(float)
         onsets = {c.event: c.onset_date for c in result.candidates}

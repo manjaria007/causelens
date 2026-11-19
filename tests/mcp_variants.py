@@ -52,3 +52,26 @@ def plain(metrics: pd.DataFrame) -> pd.DataFrame:
     hit = desktop & (day == pd.Timestamp("2026-09-20"))
     out.loc[hit, "orders"] = np.round(out.loc[hit, "sessions"].to_numpy(float) * rate).astype("int64")
     return out
+
+
+def swapped(metrics: pd.DataFrame) -> pd.DataFrame:
+    """The planted effect moves from mobile/safari to desktop/chrome, with every window's total sessions and orders unchanged.
+
+    mobile/safari after the onset is restored to its no-effect level (+1/3 of its orders), and desktop/chrome after the onset
+    loses the same number of orders, spread in proportion. A decomposition of the reference data therefore matches this data
+    on every window total and is still about the wrong segment.
+    """
+    out = metrics.copy()
+    post = pd.to_datetime(out["date"]) >= ONSET
+    safari = _focal(out) & post
+    chrome = (out["device"] == "desktop") & (out["browser"] == "chrome") & post
+    restored = np.round(out.loc[safari, "orders"].to_numpy(float) / 0.75).astype("int64")
+    out.loc[safari, "orders"] = np.minimum(restored, out.loc[safari, "sessions"].to_numpy()).astype("int64")
+    delta = int(out.loc[safari, "orders"].sum() - metrics.loc[safari, "orders"].sum())  # what was actually added
+    base = out.loc[chrome, "orders"].to_numpy(float)
+    cut = np.floor(base * (delta / base.sum())).astype("int64")
+    remainder = delta - int(cut.sum())
+    cut[np.argsort(-base, kind="stable")[:remainder]] += 1  # hand the leftover orders to the largest rows
+    out.loc[chrome, "orders"] = (out.loc[chrome, "orders"].to_numpy() - cut).astype("int64")
+    assert (out.loc[chrome, "orders"] >= 0).all()
+    return out
