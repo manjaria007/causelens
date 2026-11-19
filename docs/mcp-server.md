@@ -76,6 +76,15 @@ working directory is not specified by Kiro's configuration. These files follow K
 by tests for valid JSON and real command-line flags. I did not run them inside Kiro itself, so confirm the server
 appears and connects in Kiro's MCP panel after copying.
 
+### Repository-scoped config and launcher
+
+`.kiro/settings/mcp.json` (tracked) starts `scripts/mcp_stdio.sh` through `/bin/bash`, without `autoApprove`. The launcher
+works from a fresh checkout: if `.venv` is missing or lacks a runtime dependency it creates it and installs
+`requirements.txt` minus pytest, hypothesis and ruff; if `data/metrics_daily.csv` is missing it generates it (seed 42)
+in a temporary directory and copies only that file, so the committed `events.csv` and `ground_truth.json` are never
+rewritten. All setup output goes to stderr; stdout carries only protocol messages. The first start takes about 40 s,
+later starts about 4 s, so a client with a short connect timeout may need a second attempt.
+
 ### Verify an actual Kiro tool call
 
 Everything above is tested with the official SDK client. **A call made from Kiro itself has not been made**: the tool
