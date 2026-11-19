@@ -36,9 +36,9 @@
   - [x] 6.3 Property test: power monotonicity
   - _Requirements: 7.1–7.4_
 
-- [ ] 7. MCP server
-  - [ ] 7.1 Expose every analytics tool with generated schemas (Streamable HTTP)
-  - [ ] 7.2 Smoke test: each tool returns under 2 s on the reference data
+- [x] 7. MCP server
+  - [x] 7.1 Expose every analytics tool with generated schemas (Streamable HTTP)
+  - [x] 7.2 Smoke test: each tool returns under 2 s on the reference data
   - _Requirements: 9.1–9.3_
 
 - [ ] 8. Orchestrator and agents

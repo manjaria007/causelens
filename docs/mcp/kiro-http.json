@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "causelens": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "disabled": false,
+      "autoApprove": [
+        "list_datasets",
+        "check_data_quality",
+        "confirm_change",
+        "detect_change_point",
+        "match_event_candidates",
+        "decompose_change",
+        "test_candidates",
+        "test_event_scope",
+        "estimate_did",
+        "check_pre_trends",
+        "run_placebo",
+        "project_impact",
+        "power_analysis",
+        "design_experiment"
+      ]
+    }
+  }
+}

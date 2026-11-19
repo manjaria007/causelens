@@ -10,14 +10,15 @@ Built for Kiroween with spec-driven development in Kiro:
 
 ## Project status
 
-The synthetic dataset generator is implemented. Analytics, MCP tools, the
-investigation pipeline, evaluation, and the console are planned in
-`.kiro/specs/metric-investigation/tasks.md`.
+Implemented and merged: the synthetic dataset generator (Task 1), data loading and quality checks, change
+confirmation and change point, localization, candidate testing with a difference-in-differences estimate, and
+experiment design (Tasks 2 to 6). The read-only MCP server (Task 7) is in review (PR #7). The investigation
+orchestrator, the ground-truth evaluation and the console (Tasks 8 to 10) are planned in
+`.kiro/specs/metric-investigation/tasks.md`; none of them is started, so no end-to-end investigation or graded run
+exists yet. Method and measured behaviour are in `docs/`.
 
-The requirements, design, task plan, and steering files under `.kiro/` are
-authoritative. Preserve that directory and its development history. Use Kiro to
-run Tasks 2 through 6 one parent task at a time, reviewing and testing each before
-moving on.
+The requirements, design, task plan, and steering files under `.kiro/` are authoritative. Preserve that directory and
+its development history. Tasks are run one parent task at a time in Kiro, each reviewed and tested before the next.
 
 ## Setup
 
@@ -44,36 +45,41 @@ python -m causelens.sim.generate --seed 7 --out data/generated/seed-7
 ## Repository layout
 
 - `causelens/sim/`: synthetic data generator
-- `causelens/analytics/`: planned deterministic analytical tools
-- `causelens/mcp/`: planned MCP server
+- `causelens/analytics/`: deterministic analytical tools (Tasks 2 to 6)
+- `causelens/mcp/`: read-only MCP server over the analytics (see `docs/mcp-server.md`)
 - `causelens/agents/`: planned investigation orchestration
 - `causelens/ui/`: planned investigation console
+- `docs/`: method, parameters, calibration results and limits for each task
 - `data/`: reference metadata and locally generated metrics
-- `tests/`: test documentation and forthcoming automated tests
+- `tests/`: pytest and Hypothesis tests, plus seeded calibration scripts in `tests/calibration/`
 
 Application code belongs in the `causelens/` package. See
 `data/README.md` for the actual data schemas.
 
 ## Task verification
 
-After each task, run:
+Run checks in this order while working on a task, and run the full suite once, at the end:
+
+1. **Targeted:** after each change, the new regression test and the tests of the module you touched, for example
+   `python -m pytest -q tests/test_patterns.py`.
+2. **Integration:** once a related block is stable, the tests of everything that depends on it.
+3. **Full:** after the final code change, once:
 
 ```bash
 python -m pytest -q
 python -m ruff check causelens tests
 ```
 
-Tests use pytest and Hypothesis. The baseline has no executable tests yet:
-`pytest` exits with code 5 when it collects no tests. That is not a passing task.
-Do not mark a task complete or begin the next task while required checks fail.
-Commit and push each completed task separately, and record actual Kiro work in
-`KIRO_NOTES.md`.
+The full suite takes several minutes, which is why it is not automated. A run that collects no tests (pytest exit
+code 5) is not a passing result. Do not mark a task complete or begin the next task while required checks fail.
+Commit and push each completed task separately, and record actual Kiro work in `KIRO_NOTES.md`.
 
-The current Kiro hook configuration at `.kiro/hooks/pytest-on-save.json` runs
-`.venv/bin/python -m pytest -q` when Kiro saves a Python file under `causelens/`.
-It uses the IDE 1.x / CLI V3 hook format. Start a Kiro session with this repository
-open and confirm it appears in Agent Hooks. Older Kiro versions need a hook
-created through their Agent Hooks panel.
+**Automation is Ruff only.** `.kiro/hooks/ruff-on-stop.json` runs `ruff check causelens tests` when the agent stops
+(a `Stop` trigger, which works in Kiro Web) and appends a record to `.pytest_cache/stop-hook-runs.log`. It does not run
+tests. File-save hooks do not run in Kiro Web, and the earlier hook that ran pytest on every save was removed. **No
+automatic execution of any hook has been observed in Kiro**, so the hook is configured but its activation is
+unverified. Running its command by hand is not evidence that Kiro fires it; the results recorded in `KIRO_NOTES.md`
+come from running the commands above directly.
 
 ## The reference case
 
@@ -90,3 +96,28 @@ investigation to find:
 analytics must infer their results from metrics and events rather than read that
 answer. Follow `.kiro/steering/scientist-rules.md` for uncertainty, assumptions,
 and limits on causal claims.
+
+### What the analytics report on this data
+
+Checked against the planted truth above, not read from it (`docs/candidate-testing.md` has the numbers):
+
+- It localizes the change to mobile Safari and flags 2026-09-20 as a data-quality issue.
+- **Checkout v4.2 is `supported` with `moderate` evidence, and only under the stated assumption that its effect begins
+  on the event date (lag 0).** The estimate is a differential effect of about -0.68 pp (95% interval -0.77 to -0.58)
+  against a planted segment effect of -0.66 pp.
+- The evidence is `moderate`, not `strong`, because attribution is ambiguous: Hero at a one-day delay would begin on the
+  same date as Checkout at lag 0, and the data cannot tell those apart. A randomized rollback would settle it, and
+  `design_experiment` plans one (`docs/experiment-design.md`).
+- The Homepage hero refresh is `rejected` as the sole immediate explanation (lag 0). That is not a finding that it
+  contributed nothing.
+
+How often this works, over 150 simulated seeds per scenario (`docs/candidate-testing.md` has the tables and intervals):
+
+- **Recovered:** the planted cause in 83% of runs (2% wrongly rejected, all flagged as ambiguous), and a swapped true cause
+  (Hero) in 92%.
+- **Delayed effects are not identifiable.** If Hero acted with a one-day delay the data are identical to the reference
+  case, so the tool names Checkout in 83% of those runs. It flags the attribution as ambiguous, but it is wrong.
+- **Staged effects break the single-source model.** When Hero and Checkout each contribute half, 29% of runs are wrong
+  without an ambiguity flag.
+- **Weak effects are mostly missed.** A -12% effect is recovered in 27% of runs, and at -6% most runs stop at the
+  confirm-change step (59%).

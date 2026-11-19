@@ -7,7 +7,8 @@ written by other tools to Kiro.
 
 - Repository setup and the synthetic data generator were prepared with other tools before the Kiro build; Kiro implementation began with Task 2.
 - Codex prepared this setup branch: documentation, generated-data/cache ignores,
-  removal of the src placeholder, and the pytest-on-save hook configuration.
+  removal of the src placeholder, and the pytest-on-save hook configuration (since removed; see
+  "Automation and verification (current)").
 - Existing steering, requirements, design, task checklist, simulator, events, and
   ground truth are preserved. Tasks 2 through 6 remain unimplemented.
 - The hook uses the current Kiro IDE 1.x / CLI V3 schema documented at
@@ -33,7 +34,8 @@ written by other tools to Kiro.
 Start each parent task in .kiro/specs/metric-investigation/tasks.md, complete its
 subtasks, review the diff, run pytest, and fix failures before moving on. Keep
 analytical code in causelens/analytics/. Commit and push each completed task
-separately. Stop after Task 6 for review before starting the MCP server or agents.
+separately, and stop after each parent task for review before starting the next.
+The verification order is in "Automation and verification (current)" below.
 
 For each task, record:
 
@@ -42,6 +44,49 @@ For each task, record:
 - Any specification issue and how it was resolved.
 - Commands and actual test results.
 - The commit containing the completed task.
+
+## Automation and verification (current)
+
+This section is the current state. Earlier entries describe what was true when they were written, including a
+full-suite Stop hook and a pytest-on-save hook, and a "Hooks section on the `hook-pytest-on-stop` branch".
+
+- **Automation is Ruff only.** `.kiro/hooks/ruff-on-stop.json` (tracked on `main`) runs
+  `.venv/bin/python -m ruff check causelens tests` on the `Stop` trigger, resolves the active git checkout first (falling
+  back to `/projects/sandbox/causelens`), appends a record to `.pytest_cache/stop-hook-runs.log`, and always exits 0. It
+  runs no tests: the full suite takes 3 to 6 minutes. The workspace copy that a Web session loads,
+  `/projects/sandbox/.kiro/hooks/ruff-on-stop.json`, is outside git and identical to it. The old full-suite
+  `pytest-on-stop.json` and the pytest-on-save hook were removed. `hook-pytest-on-stop` is a superseded branch holding the
+  same file. `ruff-after-task.json` (a prompt hook that runs Ruff after a spec task and checks that the full suite ran
+  once) exists only as an untracked local file.
+- **Activation is unverified.** No automatic execution of any hook has been observed in Kiro. File-save triggers do not
+  run in Kiro Web. Running a hook's command by hand (I did, in the repository, the workspace root and a temporary worktree)
+  shows the command works; it does not show that Kiro fires it. Every test result in these notes comes from running the
+  commands directly.
+- **Verification order.** (1) After each change, the new regression and the affected module's tests. (2) After a related
+  block is stable, the dependent integration tests. (3) After the final code change, the full suite and Ruff, once
+  (`.venv/bin/python -m pytest -q` and `.venv/bin/python -m ruff check causelens tests`). A wording-only change needs the
+  focused tests and Ruff, not another full run, and a note says so when the full suite was not rerun. Slow statistical
+  calibration (hundreds of simulated datasets) is run only when a change touches statistical behaviour, in separate
+  scripts rather than in the fast suite.
+
+## Reference result, as reported
+
+Wording to keep consistent across the README, the docs and any write-up. Numbers and intervals are in
+`docs/candidate-testing.md` and `docs/experiment-design.md`; this does not repeat them.
+
+- Checkout v4.2 is `supported` with evidence strength **`moderate`**, **conditional on lag 0** (the effect begins on the
+  event date). It is not `strong` because attribution is ambiguous: Hero at lag 1 and Checkout at lag 0 begin on the same
+  date, so the data cannot separate them (a strong base strength is capped at `moderate`).
+- Hero is `rejected` only as the sole immediate explanation (lag 0). At lag 1 it is `inconclusive`, not excluded, and it
+  stays a lag-limited option in the experiment design.
+- The estimate is a differential effect and assumes the comparison traffic was unaffected. It is not a claim about the
+  sole historical cause.
+- Recovery rates and limits come from 150 simulated seeds per scenario (the simulator's constants overridden in memory): planted
+  cause 83%, swapped cause 92%; a one-day-delayed true cause is identical data and is named wrongly (as Checkout, flagged
+  ambiguous) in 83% of runs; staged effects are wrong without an ambiguity flag in 29%; a -12% effect is recovered in 27%
+  and at -6% 59% of runs stop at the confirm-change step. These limits are part of the result and should be stated with it.
+- Not yet true, so not to be claimed: an end-to-end investigation, the Requirement 10.2 grading (Task 9), and any statement
+  that Kiro has fired a hook.
 
 ## Review points for Kiro
 
@@ -384,3 +429,136 @@ For each task, record:
   the arm metadata correctly said lag 0). The note now quotes each arm's own `hypothesis_limit`, and that text names the
   actual lag ("immediately (lag 0)" or "with a 1-day delay (lag 1)"). The unsized-alternative path uses the same text.
 - A wording-only change: verified with the focused review and design tests (65 passed) and Ruff; the full suite was not rerun.
+
+## Task 7: MCP server (branch `task-7-mcp-server`)
+
+- Built from `main` at `1977a36` as a thin, read-only adapter in `causelens/mcp/` (`datasets.py`, `models.py`, `tools.py`,
+  `server.py`, `__main__.py`). `causelens/analytics/`, the simulator, `data/` and steering are unchanged (`git diff
+  --stat main` on those paths is empty). Documentation: `docs/mcp-server.md`, with Kiro examples in `docs/mcp/`.
+- The installed SDK is `mcp` 2.3 (`FastMCP` is now `MCPServer`, and the client API differs), while `requirements.txt` said
+  `mcp>=1.20`. The code targets 2.x, so the pin is now `mcp>=2.3,<3`.
+- Decisions:
+  - A tool takes `dataset_id` (a registry of configured local files; no path ever comes from the caller) and returns the
+    analytics result model unchanged, so output schemas are generated from the analytics models and `structuredContent`
+    equals `model_dump(mode="json")` of the direct call. `power_analysis` takes no dataset.
+  - Prior results (`quality`, `change_point`, `decomposition`, `candidate_testing`, `did`) are typed model arguments.
+  - `project_impact` and `design_experiment` rebuild their population from `dataset_id`, `focal`, `comparison`,
+    `quality`, `apply_exclusions` and refuse a prior result that does not match it (excluded dates, usable days, sessions;
+    or different exclusions). `test_candidates` and `test_event_scope` refuse a decomposition for different windows. These
+    checks only reject; no number is changed.
+  - Insufficient-data results are ordinary results. Invalid arguments are tool errors with a clear message and no
+    traceback or server path.
+  - The tool set is the design's eleven tools plus `test_candidates`, `match_event_candidates` and `list_datasets`. The
+    helpers that are not tools in the design are not exposed.
+  - Every input schema is `additionalProperties: false`. The SDK ignores unknown arguments, so tools are registered while
+    the SDK's argument-model base forbids extras and then restored. That uses an SDK internal; a test checks it does not
+    leak and fails loudly if the SDK changes.
+  - No caching: each call reads and validates the files (about 45 ms), so a read-only server never serves stale data.
+  - `ground_truth*` can never be configured as a dataset file (rejected at startup), and nothing else reads it.
+- Mistakes of mine caught by my own tests: an awkward annotation expression for `date` (replaced by an import); a
+  missing-file error that embedded the server's absolute path (now file names only); the first draft of the HTTP test file
+  had placeholder lines, a nonexistent attribute and a junk assertion, cleaned before its first run; the contract test
+  found `check_data_quality` calls its argument `params` where every other tool says `detector_params` (kept the
+  consistent name, made the test's mapping explicit).
+- All 108 HTTP tests passed on their first complete run, so I mutated the adapter thirteen ways to see whether they can
+  fail. Eleven were caught at once. Two were not: `apply_exclusions` ignored by `check_pre_trends`, and `comparison`
+  ignored by `project_impact`, because my cases used the defaults. Both now have dedicated tests (a lenient quality report,
+  `apply_exclusions=false` and an explicit comparison, each required to match the direct call and to differ from the
+  default), and all thirteen mutations are caught.
+- Results: `.venv/bin/python -m pytest -q` passed (915 tests, 301 s) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP tests are 145 (HTTP with the official client, real stdio and HTTP processes, configuration). Over HTTP on the
+  reference data the slowest call is 573 ms (`test_event_scope`), a cold connection plus `test_candidates` is 645 ms, and
+  every tool is asserted under 2 s with loading and serialization included.
+- Read-only, answer key, network: an audit hook records every file open and socket connect during all tools. `ground_truth.json`
+  (in the same directory as the data) is never opened, nothing under the data directory is opened for writing, file hashes and
+  modification times are unchanged, and the only connections are to loopback.
+- Not verified: that Kiro itself launches or connects to the server from the example configs (they follow Kiro's documented
+  format and are tested for valid JSON and real flags). Automatic execution of the Stop hook is still unverified.
+- Known costs: `tools/list` is about 270 KB of schema (typed prior results), and `decompose_change` returns about 164 KB.
+  There is no authentication on the HTTP transport (loopback by default). Task 8 is not started.
+
+### Task 7 review round 1 (PR #7, review supplied by the user)
+
+- Four groups of findings, each reproduced on `0b288c7` with a failing test first (53 of the 78 new regression tests failed;
+  the rest are controls such as "a matching result is still accepted"). Numbers from my reproductions, on variants of the
+  reference data built in memory (`tests/mcp_variants.py`):
+  1. Binding. A DiD result from the reference data was accepted for a dataset with the same sessions and a rise, and
+     `project_impact` returned -0.206 pp where that data give +0.195 pp. A stale candidate-testing result sized a rollback
+     at +0.585 pp where the data give -0.523 pp (the wrong direction). A DiD for mobile/safari was accepted for an
+     equal-sized mobile/chrome population (-0.189 pp where the data give +0.067 pp). The old check compared dates and session
+     totals, which none of these differ in. A stale quality report is the same defect: it changes which days are excluded.
+  2. Coercion. `mde_pp: true` ran as a 1.0 pp effect, `"0.5"` as 0.5, `allocation_ratio: true` as 1.0, and
+     `apply_exclusions: "false"` was accepted. The SDK validates arguments leniently, and so did the typed models inside prior
+     results and settings.
+  3. A symlink named `metrics.csv` pointing at a file named `ground_truth.json` was accepted at startup. I used a scratch
+     stand-in file; the real answer key was never opened.
+  4. `"events": ["events.csv"]` started the server with no event log.
+- Decisions. (1) Bind a prior result by **reproducing** it: recompute with the existing analytics from the named dataset and
+  the settings the result records, and require equality (floats to a relative 1e-9). That needs no new state, tokens or
+  fields on the analytics models, works for any client, and changes no value. It covers `quality`, `did`, `candidate_testing`
+  and `decomposition` (`causelens/mcp/provenance.py`). A change point is not checked: it records too few settings to
+  recompute faithfully, and the tool only joins its dates to the event log. The cost is a recomputation (about 0.13 s for a
+  quality report, about 0.2 s for a DiD); the slowest call is now 564 ms and a cold connection plus `test_candidates` 735 ms.
+  A hand-edited quality report is refused on purpose. (2) Numbers, integers and flags are strict per field, and model-typed
+  arguments are re-validated as strict JSON (`strictly()` in `causelens/mcp/models.py`), so the same holds inside them. The
+  published schemas are unchanged. (3) A configured file is checked by name, by every symlink hop, by its resolved target and
+  by identity against a `ground_truth*` sibling (a hard link), and the resolved path is what is kept, so a link re-pointed after
+  startup cannot redirect a read. A hard link from another directory cannot be detected. (4) Config-file values must be a string,
+  null or omitted; unknown keys are rejected.
+- Mistakes of mine. My first test file for these fixes had junk in it (a nonsense assertion, a placeholder `A.QualityHolder`,
+  a convoluted `ids=`), cleaned before its first run. Two tests encoded my own earlier wording ("different exclusions", a
+  `cov` edit that I expected to name `cov`); the new check recomputes with the claimed `cov`, so the numbers disagree instead,
+  and the tests now say that. The "baseline: true" strictness case passed on the old code by accident (1.0 is an invalid
+  baseline), so it was removed as a regression.
+- Mutation checks on the fixes: 11 mutations (each binding check disabled, `quality` unchecked in one tool, no decomposition
+  check, a lax `mde_pp`, lax nested models, no hard-link check, a non-string `events` dropped, the supplied path kept instead
+  of the resolved one). All are caught except one, which is an equivalent mutant: dropping the check of the resolved target's
+  name changes nothing, because the identity check catches the same file. The layers overlap deliberately.
+- Results: `.venv/bin/python -m pytest -q` passed (992 tests, 358 s, none skipped) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP block alone is 222 tests. A test that skipped when the generated CSV was absent now builds its own copy of the
+  layout, so none depends on `data/metrics_daily.csv`.
+- Order of work: failing regressions on the old code, the fixes, the focused MCP tests, the whole MCP block, then the full suite
+  once. No statistical code changed (`causelens/analytics/` is identical to `main`), so no calibration was rerun.
+- **Kiro tool call: still not verified.** The tool catalogue of this session does not include `causelens`, and the workspace
+  settings directory `/projects/sandbox/.kiro/settings/` is read-only to me, so I could not install the config. What I did
+  check: the exact command in `docs/mcp/kiro-stdio.json`, run from the workspace root as a process, initializes, lists 14
+  tools, answers `power_analysis` (8,158 per arm), refuses `mde_pp: true`, and exits 0 with nothing on stderr. That is not a
+  Kiro call. The steps to verify one are in `docs/mcp-server.md` ("Verify an actual Kiro tool call"). Do not start Task 8
+  until that has been done and recorded here.
+
+### Task 7 review round 2 (PR #7, review of `f71024a`)
+
+- Three findings, each reproduced with a failing test before any fix (20 of the 39 new tests failed on `f71024a`; the rest
+  are controls). One more thing the review reported was not a code defect: two timing tests failed under load and passed alone.
+  1. **A decomposition was bound by its window totals only.** That was my design, and it was not enough. `mcp_variants.swapped`
+     moves the planted effect from mobile/safari to desktop/chrome and keeps every window's total sessions and orders. A
+     decomposition of the reference data was accepted for it, `test_candidates` investigated mobile/safari and returned
+     `no_candidates`, where the right decomposition localizes to desktop/chrome and finds Checkout supported. Now every
+     segment of every partition the decomposition lists is recomputed (sessions and orders, both windows, after the window's own
+     excluded days), and a segment that the data have but the result lacks is reported. On the reference data all 71 segments of
+     the ten partitions reproduce exactly before the check was written.
+  2. **A valid 90% result was refused when it stored no interval.** `_timing_level` fell back to 95% when the total step, every
+     candidate step and every DiD were absent. I reproduced it with every onset past the data (`lag_days` of 400), which leaves
+     nothing estimable. Every share set records the level even then, so the level is read from there, and 80%, 90% and 99% results
+     are now accepted unchanged.
+  3. **Dates were still lax.** Pydantic reads `0` and `"86400"` as Unix timestamps. Checked on `f71024a`: `event_date` 0 and "0" ran
+     as 1970-01-01, and a window starting at 0 returned an `ok` result that began on 1970-01-01. `"2026-10-14T00:00:00"` was
+     accepted as a date. Dates in tool arguments (bare dates, `DateWindow`, the placebo list) are now `YYYY-MM-DD` strings only
+     (`IsoDate`). Dates inside prior-result models were already strict JSON and are tested.
+- Timing tests. The assertion "max of three calls under 2 s" is a test of the machine as much as of the code. With one core shared
+  with three busy loops it failed on `test_candidates` on my machine too (the median was inside the limit). It is now the median of
+  five calls under 2 s plus a 6 s hang guard, and the same for a cold connection plus `test_candidates` (median of three). The
+  same contention now passes; pinned to a single core without competition the old assertion also passed, so this is about noise,
+  not a speed-up. Typical latency is unchanged: the slowest call is 661 ms and a cold connection plus `test_candidates` 653 ms.
+- Mistakes of mine: the first version of the new decomposition check indexed a pandas table with a mobile key that did not match a
+  single-dimension index (a crash, `Error executing tool`), found by the first test run and rewritten with plain dictionaries; and a
+  test expected the word "toaster" in an error that lists segment labels from the result, not the edited dimension, so it now
+  checks the count the data give. Docs had a "20,727 days" figure taken from the review; I could not reproduce that number (the
+  window is about 20,740 days inclusive), so the docs no longer state one.
+- Mutation checks (7): per-segment check off, level fallback only, `event_date` lax, `DateWindow` lax, placebo dates lax, missing
+  segments not reported, level always 95%. All caught by named tests.
+- Results: `.venv/bin/python -m pytest -q` passed (1,032 tests, 377 s, none skipped) and `.venv/bin/python -m ruff check causelens tests`
+  passed. The MCP block is 262 tests.
+- Order of work: failing regressions on `f71024a`, the three fixes, the review file, the whole MCP block, then the full suite once.
+  No analytics code changed.
+- **Kiro tool call: still not verified.** Unchanged from the previous round; Task 8 stays pending until it is.
