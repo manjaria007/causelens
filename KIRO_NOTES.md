@@ -581,3 +581,63 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   `Input should be a valid number [type=float_type, input_value=True, input_type=bool]`.
 - **Status.** The Kiro CLI workaround is verified. Kiro Web issue #12523 remains unresolved; this check says nothing about it.
 - The Mac-specific edit to `.kiro/settings/mcp.json` is deliberately not committed. Task 8 has not been started.
+
+## Task 8: orchestrator and agents (branch `task-8-orchestrator-agents`)
+
+- Built from `origin/main` at `bd7cbaa` (PR #8, merged; confirmed with `git merge-base --is-ancestor` after a fetch). New code is
+  `causelens/agents/` (`state.py`, `toolbox.py`, `roles.py`, `trace.py`, `claims.py`, `reasoner.py`, `report.py`, `result.py`,
+  `wording.py`, `orchestrator.py`), `docs/agents.md`, and three test files plus `tests/agents_support.py`. `causelens/analytics/`,
+  `causelens/mcp/`, the simulator, `data/` and steering are unchanged. `tasks.md` has 8.1-8.3 ticked. The Mac-specific
+  `.kiro/settings/mcp.json` edit stayed unstaged and uncommitted.
+- Read first: the three steering files, the design, requirements and tasks, `docs/mcp-server.md`, the MCP tool signatures and the
+  analytics result models. Task 9 (evaluation) and Task 10 (console) are not started.
+- What it does: the orchestrator calls the real MCP server through the official SDK client (`mcp.Client`) and logs every call
+  (`InvestigationState.log`: role, stage, tool, arguments as sent, the server's structured result). Prior results are logged as
+  `{"$prior": seq}`. Three roles are a prompt plus an allowed tool subset; the toolbox refuses any other tool before sending.
+  Prompts embed `scientist-rules.md` verbatim.
+- The design's LLM layer is kept as a `Reasoner` protocol. It returns sentence templates whose numbers are references into the
+  log; the orchestrator validates them (no digit in the text, every reference resolves, no cause-asserting words outside a causal
+  claim that cites a passed difference-in-differences result and quotes its assumptions) and drops and records what fails.
+  `TemplateReasoner` is the deterministic offline implementation. **No model-backed reasoner ships and none was run.**
+- Every number in the result is a `Traced` / `TracedInterval` read from the log by a `Tracer`; `verify_traces` re-reads all of
+  them (more than 150 on the reference run), and a test requires that the dumped result has no int or float outside a traced
+  object except log positions.
+- Decisions I made that the spec did not dictate (each is in `docs/agents.md`):
+  - The request carries the windows. `question` is recorded, not interpreted.
+  - Evidence strength is the tool's assessment for the weakest supported candidate; with none supported, or a stopped run, it is
+    `insufficient` with a fixed reason. A causal claim needs `supported`, a valid comparison, an interval excluding 0 and passing
+    pre-trend and placebo checks (borderline does not count).
+  - Estimates are made only for supported candidates, using the standalone `estimate_did`, `check_pre_trends`, `run_placebo` and
+    `project_impact`, cross-checked against the DiD embedded in the candidate test.
+  - With no single leading candidate, `design_experiment` is called with `arms="each_candidate"` instead of naming a target the
+    tests did not pick.
+  - Role tool subsets differ from the design table by `list_datasets`, `match_event_candidates` (Detective) and `test_candidates`
+    (Scientist). `power_analysis` is allowed to the designer and not called.
+- Reference result (seed 42, 12 calls): Checkout v4.2 `supported` (lag 0), Homepage hero refresh `rejected` as the sole immediate
+  explanation, localized to mobile x Safari, `excluded_dates` exactly `["2026-09-20"]`, DiD interval covering the true segment
+  effect, evidence `moderate` (base `strong`, capped by release ambiguity), experiment purpose `settle`. The same run over a real
+  stdio process gives byte-identical JSON.
+- Mistakes of mine caught by my own checks:
+  - The wording check first used `caus\w*`, which flagged "causal" in my own fixed phrases, and three of my phrases used
+    "because". The regex is now the verb forms and the phrases were reworded.
+  - Running a weak-effect scenario showed `design_experiment` returning `needs_input` ("name one with target_candidate") when no
+    candidate leads; that produced the `each_candidate` decision above.
+  - Test errors: a wrong count of traced values (2, not 3), a wrong count of calls reusing the quality report (8, not 9), a digit
+    check that counted placeholder names such as `{d0}`, a causal-claim test sentence with no assumption placeholder, and a
+    perturbation test whose tampered DiD was refused by the server's own provenance check. The last one is now a test of that
+    behavior: a candidate result altered in transit is recorded as `matches_candidate_test = False`, and the server then refuses to
+    build the experiment on it, so the run stops at `design_experiment`.
+- Mutation checks (13): role limit off, digits allowed, cause words allowed, claim without a DiD call, verification skipped,
+  pre-trend ignored, placebo ignored, interval-includes-zero ignored, strongest instead of weakest strength, estimates for
+  unsupported candidates, no stop on an unconfirmed change, exclusions not reused, cross-check off. Ten were caught at once.
+  Three were not (interval including zero, weakest vs strongest, the cross-check); each now has a test, and all 13 are caught.
+- Results: targeted agents tests 64 passed; the MCP block (server, CLI, datasets, review) 262 passed; then the full suite once after
+  the last code change, `.venv/bin/python -m pytest -q`: 1,096 passed (126 s, none skipped); `.venv/bin/python -m ruff check
+  causelens tests` passed. That is 64 new tests on top of the 1,032 in Task 7. Run on Python 3.14.5.
+- Not verified: a model-backed reasoner; the orchestrator over the HTTP transport (in-process and stdio were run); running the
+  orchestrator from inside Kiro. The weak-effect and no-event-log paths are tested on simulated data only. The candidate tests'
+  incorrect-attribution rates are unchanged (`docs/candidate-testing.md`); no new statistics were added.
+- Known limits: a causal claim is made for at most the candidates the tests support, and the reference run reports the claim with
+  `moderate` strength, not `strong`, because of the ambiguity cap. Display formats fix decimals (for example 3 for pp); the stored
+  values are exact. A 3-arm experiment on a weak effect can come back with a duration of years (the tool's own figure); the
+  design warnings are passed through as caveats.
