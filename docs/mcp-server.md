@@ -73,8 +73,8 @@ Local process over stdio (for Kiro Web, where the workspace root is `/projects/s
 
 Use absolute paths: the package is not pip-installed, so `PYTHONPATH` points at the repository, and the process's
 working directory is not specified by Kiro's configuration. These files follow Kiro's documented format and are checked
-by tests for valid JSON and real command-line flags. I did not run them inside Kiro itself, so confirm the server
-appears and connects in Kiro's MCP panel after copying.
+by tests for valid JSON and real command-line flags. Native Kiro CLI calls have been verified as recorded below;
+Kiro Web attachment remains unresolved, so confirm connection status in the client you use.
 
 ### Repository-scoped config and launcher
 
@@ -87,9 +87,17 @@ later starts about 4 s, so a client with a short connect timeout may need a seco
 
 ### Verify an actual Kiro tool call
 
-Everything above is tested with the official SDK client. **A call made from Kiro itself has not been made**: the tool
-catalogue of the session that built this server did not include it, because Kiro loads MCP servers when a session starts.
-Before relying on Kiro to call these tools:
+**Kiro CLI verified.** On November 21, 2026, a local Kiro CLI 3.5.0 session on macOS with Python 3.14.5 listed
+`causelens` as running with 14 tools and made the four calls through its attached MCP tools. `list_datasets` returned
+5,888 reference rows; `power_analysis` returned 8,158 sessions per arm; `check_data_quality` returned `excluded_dates`
+exactly `["2026-09-20"]` with the desktop tracking flag; and the JSON boolean `mde_pp: true` was rejected. These were
+native Kiro CLI calls, not a terminal SDK probe. The actual results and fingerprints are recorded in `KIRO_NOTES.md`.
+
+**Kiro Web unresolved.** Saved Web Agent Config entries and repository configuration have not made the CauseLens tools
+available in the tested Web sessions. [Kiro issue #12523](https://github.com/kirodotdev/Kiro/issues/12523) tracks the
+Web Agent Config path; the CLI workaround does not establish that Web attachment works.
+
+For a Kiro Web connection check, use the procedure below and record actual responses or the connection error:
 
 1. Copy `docs/mcp/kiro-stdio.json` (or `kiro-http.json` with the server running) to `.kiro/settings/mcp.json` in the
    workspace (the Kiro Web workspace root is `/projects/sandbox`). Leave `autoApprove` out for the first run if you want to
