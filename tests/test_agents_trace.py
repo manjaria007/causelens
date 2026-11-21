@@ -9,6 +9,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from causelens.agents import wording
+from causelens.agents.claims import ClaimEligibility, required_refs
 from causelens.agents.state import InvestigationState, LoggedCall
 from causelens.agents.trace import (
     CAUSAL_WORDS,
@@ -181,19 +182,88 @@ def test_placeholders_and_references_must_match_and_resolve():
         validate_statement(stmt("Says {a}.", a=Ref(call=1, path="/verdict", fmt="pp")), state)
 
 
-def test_a_causal_claim_needs_a_passed_design_and_its_assumptions():
+def claim_state() -> tuple[InvestigationState, ClaimEligibility]:
+    """A log with two candidates in call 1, a DiD in call 2 and its two checks in calls 3 and 4. Candidate 1 is the supported one."""
+    state = InvestigationState(request=request())
+    candidates = [
+        {"event": "Hero", "onset_date": "2026-10-13", "lag_days": 0, "verdict": "rejected"},
+        {"event": "Checkout", "onset_date": "2026-10-14", "lag_days": 0, "verdict": "supported"},
+    ]
+    state.log.append(LoggedCall(seq=1, role="Scientist", stage="test", tool="test_candidates", arguments={},
+                                result={"candidates": candidates, "focal": {"label": "mobile safari"}}))
+    did = {"effect_pp": {"estimate": -0.68, "lower": -0.77, "upper": -0.58, "level": 0.95}, "n_obs": 182,
+           "assumptions": ["Parallel trends hold.", "The comparison was unaffected."]}
+    state.log.append(LoggedCall(seq=2, role="Scientist", stage="estimate", tool="estimate_did", arguments={}, result=did))
+    for seq, tool in ((3, "check_pre_trends"), (4, "run_placebo")):
+        state.log.append(LoggedCall(seq=seq, role="Scientist", stage="estimate", tool=tool, arguments={}, result={"status": "pass"}))
+    claim = ClaimEligibility(event="Checkout", allowed=True, reason="ok", did_call=2, pre_trend_call=3, placebo_call=4,
+                             verdict_call=1, verdict_path="/candidates/1/verdict")
+    return state, claim
+
+
+def claim_statement(state, claim, *, index: int = 1, text: str | None = None, drop: str | None = None, **override) -> Statement:
+    refs = {name: Ref(call=c, path=p, fmt=f) for name, (c, p, f) in required_refs(state, claim).items()}
+    refs["event"] = Ref(call=1, path=f"/candidates/{index}/event", fmt="text")
+    refs.update(override)
+    body = text or ("By difference-in-differences, the change attributed to {event} (lag {lag}, onset {onset}) is {effect} "
+                    "({lower} to {upper} at {level}, {n} observations), if: {a0} {a1}")
+    if drop:
+        refs.pop(drop)
+        body = body.replace("{" + drop + "}", "something")
+    return Statement(role="Scientist", kind="causal_claim", text=body, refs=refs)
+
+
+def test_a_causal_claim_is_bound_to_one_eligible_claim():
+    state, claim = claim_state()
+    validate_statement(claim_statement(state, claim), state, allowed_claims=[claim])
+    with pytest.raises(TraceError, match="exactly one"):
+        validate_statement(claim_statement(state, claim), state)  # nothing is eligible
+    blocked = claim.model_copy(update={"allowed": False})
+    assert not blocked.allowed
+
+
+@pytest.mark.parametrize("drop", ["event", "onset", "lag", "effect", "lower", "upper", "level", "n", "a0", "a1"])
+def test_a_causal_claim_must_quote_every_part_of_its_claim(drop):
+    state, claim = claim_state()
+    with pytest.raises(TraceError, match="not bound to the claim"):
+        validate_statement(claim_statement(state, claim, drop=drop), state, allowed_claims=[claim])
+
+
+def test_a_causal_claim_cannot_name_another_candidate_even_through_a_reference():
+    state, claim = claim_state()
+    with pytest.raises(TraceError, match="not bound"):
+        validate_statement(claim_statement(state, claim, index=0), state, allowed_claims=[claim])
+    extra = {"other": Ref(call=1, path="/candidates/0/verdict")}
+    wrapped = claim_statement(state, claim, text="By difference-in-differences {event} {lag} {onset} {effect} {lower} {upper} {level} {n} {a0} {a1} {other}", **extra)
+    with pytest.raises(TraceError, match="not bound"):
+        validate_statement(wrapped, state, allowed_claims=[claim])
+
+
+def test_a_causal_claim_cannot_type_an_event_name_or_skip_the_design():
+    state, claim = claim_state()
+    typed = claim_statement(state, claim, text="By difference-in-differences, Hero is {effect} ({lower} {upper} {level} {n}) {lag} {onset} {a0} {a1} {event}")
+    with pytest.raises(TraceError, match="type an event name"):
+        validate_statement(typed, state, allowed_claims=[claim])
+    unnamed = claim_statement(state, claim, text="The change attributed to {event} (lag {lag}, onset {onset}) is {effect} ({lower} {upper} {level} {n}) {a0} {a1}")
+    with pytest.raises(TraceError, match="name its design"):
+        validate_statement(unnamed, state, allowed_claims=[claim])
+
+
+def test_a_causal_claim_cannot_reformat_a_figure():
+    state, claim = claim_state()
+    wrong = claim_statement(state, claim, effect=Ref(call=2, path="/effect_pp/estimate", fmt="count"))  # would show the estimate as a whole number
+    with pytest.raises(TraceError, match="not bound to the claim"):
+        validate_statement(wrong, state, allowed_claims=[claim])
+
+
+@pytest.mark.parametrize("text", ["The effect is {effect", "The effect is effect}", "The effect is {}", "The effect is {0}", "{{effect}"])
+def test_a_malformed_template_is_a_trace_error_not_a_crash(text):
     state = state_with(RESULT)
-    claim = stmt("The release caused {c} given {a}.", "causal_claim", c=Ref(call=1, path="/abs_change_pp/estimate", fmt="pp"),
-                 a=Ref(call=1, path="/assumptions/0"))
-    with pytest.raises(TraceError, match="difference-in-differences"):
-        validate_statement(claim, state)  # no design call is allowed
-    validate_statement(claim, state, allowed_claim_calls=frozenset({1}))
-    no_assumption = stmt("The release caused {c}.", "causal_claim", c=Ref(call=1, path="/abs_change_pp/estimate", fmt="pp"))
-    with pytest.raises(TraceError, match="assumptions"):
-        validate_statement(no_assumption, state, allowed_claim_calls=frozenset({1}))
-    other_call = frozenset({2})
-    with pytest.raises(TraceError, match="difference-in-differences"):
-        validate_statement(claim, state, allowed_claim_calls=other_call)
+    s = stmt(text, effect=Ref(call=1, path="/verdict"))
+    with pytest.raises(TraceError):
+        validate_statement(s, state)
+    with pytest.raises(TraceError):
+        render(s, state)
 
 
 def test_the_orchestrators_own_phrases_contain_no_digits():

@@ -4,7 +4,15 @@ See ``docs/agents.md``. The analytics run behind the MCP server; nothing here co
 """
 from causelens.agents.claims import ClaimEligibility, assess_claim
 from causelens.agents.orchestrator import Investigation, investigate, investigate_sync
-from causelens.agents.reasoner import Context, Reasoner, TemplateReasoner
+from causelens.agents.parameters import TUNABLE, ParameterChoice, ParameterError
+from causelens.agents.reasoner import (
+    Context,
+    ModelOutputError,
+    ModelReasoner,
+    Reasoner,
+    TemplateReasoner,
+    TextModel,
+)
 from causelens.agents.result import InvestigationResult
 from causelens.agents.roles import (
     DETECTIVE,
@@ -41,6 +49,7 @@ __all__ = [
     "EXPERIMENT_DESIGNER",
     "ROLES",
     "SCIENTIST",
+    "TUNABLE",
     "ClaimEligibility",
     "Context",
     "Investigation",
@@ -49,12 +58,17 @@ __all__ = [
     "InvestigationState",
     "LoggedCall",
     "McpToolClient",
+    "ModelOutputError",
+    "ModelReasoner",
+    "ParameterChoice",
+    "ParameterError",
     "Prior",
     "Reasoner",
     "Ref",
     "Role",
     "Statement",
     "TemplateReasoner",
+    "TextModel",
     "ToolCallError",
     "ToolNotAllowed",
     "Toolbox",

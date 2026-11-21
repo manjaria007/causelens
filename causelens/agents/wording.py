@@ -31,13 +31,28 @@ WHY_ALTERNATIVE = (
     "Kept as an alternative: the evidence neither supports nor rejects it. The reasons and the lag sensitivity say what would "
     "change that."
 )
-WHY_REJECTED = (
-    "Rejected on positive statistical evidence against its named hypothesis. This rejects it as the sole source of the "
-    "localized change; it does not show that the event contributed nothing."
+WHY_REJECTED_SOLE_SOURCE = (
+    "Rejected on positive statistical evidence: the timing contrast rejects it as the sole source of the localized change. "
+    "This does not show that the event contributed nothing."
+)
+WHY_REJECTED_PATTERN = (
+    "Rejected on positive statistical evidence: a direct test contradicts the effect pattern declared for it. This does not "
+    "show that the event contributed nothing."
+)
+WHY_REJECTED_EXPOSURE = (
+    "Rejected on positive evidence: the localized change is disjoint from the visitors the event could have touched. This does "
+    "not show that the event contributed nothing to other visitors."
+)
+WHY_REJECTED_UNSPECIFIED = "Rejected by the tool; the reasons give the ground."
+SHARE_SET_NOTE = (
+    "The set describes calendar steps under the lag model: the share of the localized change that begins at this onset date. It "
+    "is not a release's causal share."
 )
 
 NO_ESTIMATE_NO_SUPPORTED = "No candidate was supported, so no causal estimate was produced."
 NO_ESTIMATE_NOT_RUN = "The investigation stopped before candidate testing, so no causal estimate was produced."
+NO_ESTIMATE_NO_EVENT_LOG = "The dataset has no event log, so no candidate was tested and no causal estimate was produced."
+NO_ESTIMATE_INCOMPLETE = "The stage that produces the estimate did not complete, so no causal estimate was produced."
 
 STRENGTH_NO_SUPPORTED = (
     "No candidate explanation is supported by the tests, so the evidence cannot support a causal claim. See the candidate "
@@ -55,5 +70,9 @@ STRENGTH_WEAKEST_SUPPORTED = (
     "Strength is that of the weakest supported candidate's evidence assessment, reported with the tool's own reasons."
 )
 
+STRENGTH_DESIGN_FAILED = "The experiment design call failed after testing completed; the strength is that of the completed tests."
+NOT_RUN_FAILED = "The experiment design call failed, so no recommendation was produced."
+NOT_RUN_NO_EVENT_LOG = "The dataset has no event log, so no experiment was designed."
+NOT_RUN_SKIPPED = "No experiment was designed: the tests produced no focal segment to design for."
 NOT_RUN_STOPPED = "The investigation stopped before there was anything to test, so no experiment is recommended."
 NOT_RUN_NO_CANDIDATE_TESTING = "Candidate testing did not run, so no experiment design was produced."

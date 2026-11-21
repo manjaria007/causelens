@@ -24,10 +24,17 @@ run.state.log            # every MCP call, with its arguments and the server's r
 the windows come from the request. Declared `expected_patterns` and `lag_days` are the user's and are passed through
 unchanged; nothing is inferred from an event's name.
 
+The request is parsed as strictly as the MCP boundary: dates are ISO `YYYY-MM-DD` strings (not timestamps, numbers or date-times),
+a lag is a JSON integer (`true`, `"1"` and `1.0` are refused), strings are not coerced, and a declared pattern is validated as
+strict JSON. Reversed windows are the server's to refuse; the failed call is logged.
+
 ## Shared state and the log
 
-`InvestigationState` holds the request, the stage records and `log`, an append-only list of `LoggedCall`: sequence number, role,
-stage, tool, the arguments as sent and the structured result exactly as the server returned it (or the error text).
+`InvestigationState` holds the request, the stage records, the parameter decisions and `log`, an append-only list of `LoggedCall`:
+sequence number, role, stage, tool, the arguments as sent and the structured result exactly as the server returned it (or the error
+text). Each entry is a snapshot. The toolbox copies what the caller passed and what the server returned, and the stored payloads are
+read-only (`FrozenDict`, `FrozenList`), so editing a caller's segment list after a call, or a result in place, cannot rewrite the
+history. The `log` list itself is append-only by convention; code that replaces an entry is replacing history.
 A prior result passed to a later call (the quality report, the decomposition) is stored in the arguments as
 `{"$prior": seq}`, so the log is readable and the data are stored once. The `Toolbox` checks that a prior comes from the tool
 that produces that argument. Results are validated into the analytics models only when read (`state.model(call)`).
@@ -72,16 +79,22 @@ tools. The designer's `power_analysis` is available but not called: `design_expe
    tool needs a target or one arm per open candidate; the orchestrator uses one arm per open candidate rather than name a winner
    the tests did not.
 
-A failing tool call is logged, the stage is marked `stopped`, and the result has status `stopped_tool_error` with the failed call's
-position. Nothing is retried or filled in.
+A failing tool call is logged, the stage is marked `stopped`, and the result has status `stopped_tool_error` with the failed
+call's position and the stage that stopped. That includes transport failures: a server that goes away mid-run gives a logged
+`SessionClosed` entry, not an exception. (`McpToolClient` runs the SDK session in its own task, because the SDK cancels the task
+that opened it when its transport fails; a real cancellation of the caller still propagates.) Nothing is retried or filled in.
+
+The report's account of what did not happen is derived from how the stages ended. A failure after testing keeps the tests'
+evidence and any estimate and says only that the design call failed; a failure during estimation says the estimate did not complete;
+a stop before testing says testing did not run; a dataset with no event log says that.
 
 ## The result
 
 `InvestigationResult` has: confirmed change, change point, localization, candidate verdicts (with the lag actually evaluated,
 the reasons, the lag sensitivity and ambiguity), causal estimates, unexplained remainder, data-quality notes, evidence strength
 with reason, the recommended experiment, assumptions, and the statements written for the reader. It is deterministic given the
-data and the request, and identical over an in-process server and a real stdio process (a test compares them byte for byte). HTTP was not run in
-this task.
+data and the request, and identical over an in-process server and a real stdio process (a test compares them byte for byte). The same
+run over Streamable HTTP is also compared in a test.
 
 **Every number is a `Traced` or `TracedInterval`.** Each holds the value together with the log position and JSON pointer it was
 read from, built only by a `Tracer` that reads the log. `verify_traces` reads every one again and requires equality, and
@@ -89,6 +102,16 @@ read from, built only by a `Tracer` that reads the log. `verify_traces` reads ev
 object, apart from log positions. An interval carries its level and the sample sizes behind it (days, sessions, observations).
 A p-value appears only next to the effect size it belongs to. Tool-written text (headlines, reasons, assumptions) is traced the
 same way, as a `text` value.
+
+**Why a candidate was rejected.** A rejected candidate lists the ground or grounds the tool rejected on, read from its structured
+fields: the exposure check (`disjoint`), a declared pattern that a direct test contradicted, or the sole-source timing test. The
+plain statement beside it says the same and no more. A pattern rejection is not described as a sole-source rejection (Checkout under
+a declared uniform pattern is rejected on the pattern, while its sole-source test is not rejected), and no rejection is described as
+the event contributing nothing. `sole_source_rejected` is reported separately.
+
+**Share confidence sets.** Each tested candidate carries the confidence set for the share of the localized change that begins at its
+onset date (Requirement 5.3): level, kind, each interval (an open end is `None`), or the tool's reason when it is unavailable. The
+set is labelled as describing calendar steps under the lag model, not a release's causal share.
 
 **Evidence strength.** For a supported candidate it is the tool's own assessment (`strong`, `moderate`, `weak`, `insufficient`)
 with its reasons. With more than one supported candidate the weakest is reported. With none, or when the run stopped, it is
@@ -102,29 +125,54 @@ change is unexplained by the event log.
 
 **Causal claims.** `assess_claim` allows the claim for an event only when it is `supported`, there is a valid comparison, the
 difference-in-differences interval excludes zero, and the pre-trend and placebo checks both `pass` (a borderline or unrun check
-does not count). The claim sentence quotes the estimate with its interval and sample size, and the design's assumptions next to
-it, and labels the attribution to the release as separate. When the claim is not allowed, the report says "no causal claim is
-made" and the estimate is reported as consistent with.
+does not count). A causal sentence is then bound to that one claim (`causelens.agents.claims.required_refs`): it must quote the
+claim's event, evaluated lag and onset, the estimate with its interval and level, the sample size, and every assumption of the
+design, each in its required format (an estimate cannot be shown as a whole number); it must name the design; it may quote nothing
+about another candidate, so a rejected event cannot borrow the supported event's estimate; and it may not type an event name. When the
+claim is not allowed, the report says "no causal claim is made" and the estimate is reported as consistent with. The attribution to
+the release is labelled as a separate claim.
 
 ## The LLM layer
 
-The design splits the work: agents decide what to analyse and write the report; tools compute. `Reasoner.interpret(role, context)`
-is that LLM boundary. It returns `Statement` objects: a sentence template whose placeholders are bound to `Ref(call, path, format)`
-entries into the log. The orchestrator validates each statement before it enters the report:
+The design splits the work: agents decide what to analyse and write the report; tools compute. `Reasoner` is that boundary, with
+two methods the orchestrator calls at fixed points.
+
+* `choose_parameters(role, tool, context)` runs before each call to a tool that has tunable parameters
+  (`causelens.agents.parameters.TUNABLE`: `confirm_change` bootstrap size and minimum days, the event lead window of
+  `match_event_candidates` and `test_candidates`, and the explaining-set threshold and pair option of `decompose_change`). The list is
+  short on purpose. Windows, the dataset, prior results, exclusions, declared patterns and lags, seeds, significance levels, power and
+  the minimum detectable effect are the user's or the pipeline's, so a choice that names any of them is refused. A choice is validated
+  strictly (a JSON integer is not `true`, `"7"` or `7.0`; ranges are inclusive), its rationale follows the sentence rules (no digits, no
+  cause-asserting words), and a refused choice is refused whole: the tool's default is used and the refusal is in
+  `parameter_choices`. An accepted choice appears in the call's logged arguments; the result lists the parameter names and the
+  rationale, not the values.
+* `interpret(role, context)` runs right after each role's stages (and, after a failure, for the role that was working), so a model
+  sees the Detective's results before the Scientist runs. It returns `Statement` objects: a sentence template whose placeholders are
+  bound to `Ref(call, path, format)` entries into the log.
+
+Each statement is validated before it enters the report:
 
 * the template text contains no digit, so a number can reach a sentence only through a reference;
-* every placeholder has a reference and every reference resolves to a value in the log of the right kind for its format;
+* every placeholder has a reference and every reference resolves to a value of the right kind for its format; a malformed template
+  (an unmatched brace, `{}`, `{0}`, `{a.b}`) is a rejection, not a crash;
 * words that assert a cause (`cause`, `because`, `due to`, `led to`, `responsible`, and similar) are rejected, except in a
-  `causal_claim` that cites a difference-in-differences call whose checks passed and quotes that call's assumptions.
+  `causal_claim` bound to an eligible claim as described above;
+* a statement written for another role is refused.
 
-A rejected statement is dropped and listed in `rejected_statements`; it is never repaired. Display formats (`pp`, `pct`, `level`,
-`count`) fix the number of decimals in code; the stored values are never rounded.
+A rejected statement or parameter choice is dropped and listed (`rejected_statements`, `parameter_choices`); it is never repaired. A
+reasoner that raises is recorded the same way and the investigation continues, because the structured result does not depend on the
+text. Display formats (`pp`, `pct`, `level`, `count`) fix the number of decimals in code; the stored values are never rounded.
 
-`TemplateReasoner` is the deterministic, offline implementation, so the demo needs no model (tech.md). A model-backed reasoner
-implements the same protocol: it builds its system message with `Role.system_prompt()`, asks the model for statements in the
-`Statement` schema, and returns them. No such reasoner ships in this task. The validation does not depend on who wrote the
-statement, and a test drives the orchestrator with a scripted reasoner that tries a typed-in number, a cause-asserting sentence,
-an unresolved reference and a forged causal claim: all four are rejected and recorded.
+`TemplateReasoner` is the deterministic, offline implementation, so the demo needs no model (tech.md): fixed sentence templates and the
+tools' own parameter defaults. `ModelReasoner` implements the same protocol over any `TextModel` (`complete(system, user) -> str`). It
+sends `Role.system_prompt()` (the role's instructions, its tools, the writing contract and `scientist-rules.md` verbatim) and a JSON
+user message with a digest of the logged results (pointers to scalar values, capped in size), the allowed claims with the references
+each must quote, the formats, and the tunable parameters; it expects a JSON object back and parses it strictly. Its output is
+untrusted and goes through the validation above.
+
+**What was and was not run.** `ModelReasoner` is tested with scripted models that stand in for a provider (what it sends, how it reads
+replies, malformed replies, a hostile reply that tries a typed number, a cause, a protected parameter and a rejected event's
+estimate). No provider adapter ships and no hosted model was called, so how a real model behaves behind it is not known.
 
 ## Tests
 
@@ -132,6 +180,9 @@ an unresolved reference and a forged causal claim: all four are rejected and rec
   random JSON document resolves to its value; any digit in a template is rejected; values round-trip exactly).
 * `tests/test_agents_toolbox.py`: role limits, the call log, prior pointers, error logging, and the official client against the real
   server.
+* `tests/test_agents_llm.py`: parameter choice (accepted, refused, protected), when the reasoner is consulted, the model-backed reasoner
+  with scripted models, and the digest.
+* `tests/test_agents_review.py`: one regression per finding of the PR #9 review of `f62a8b4`.
 * `tests/test_agents_investigation.py`: the reference investigation graded against `ground_truth.json` (Checkout supported, Hero
   rejected, 2026-09-20 flagged, localized to mobile Safari, interval covers the true effect), traceability, the scientist rules,
   stopping at `confirm_change`, a dataset without events, an unknown dataset, a failing call, a hostile reasoner, withheld claims,

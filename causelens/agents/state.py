@@ -9,10 +9,10 @@ Nothing here computes a number. Results are validated into the analytics models 
 """
 from __future__ import annotations
 
-from datetime import date
+import copy
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from causelens.analytics import (
     CandidateMatchResult,
@@ -31,6 +31,7 @@ from causelens.analytics import (
     PreTrendResult,
 )
 from causelens.mcp.datasets import DatasetCatalog
+from causelens.mcp.models import IsoDate, strictly
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -67,12 +68,12 @@ PRIOR_ARGUMENT_SOURCE: dict[str, str] = {
 
 
 class Window(BaseModel):
-    """An inclusive calendar window."""
+    """An inclusive calendar window. Dates are ISO ``YYYY-MM-DD`` only (the MCP boundary's rule: no timestamps, no numbers)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    start: date
-    end: date
+    start: IsoDate
+    end: IsoDate
 
     def as_arguments(self) -> dict[str, str]:
         return {"start": self.start.isoformat(), "end": self.end.isoformat()}
@@ -81,19 +82,22 @@ class Window(BaseModel):
 class InvestigationRequest(BaseModel):
     """What the user asks. Windows, declared patterns and lags are the user's; nothing is inferred from event names.
 
+    Values are not coerced, as at the MCP boundary: a date is an ISO string, a lag is a JSON integer (``true``, ``"1"`` and
+    ``1.0`` are refused), and a declared pattern is validated as strict JSON.
+
     ``question`` is recorded and echoed in the report. The orchestrator does not interpret it: the metric is the dataset's
     conversion rate (``orders / sessions``).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    question: str
-    dataset_id: str
+    question: StrictStr
+    dataset_id: StrictStr
     pre_window: Window
     post_window: Window
-    candidates: list[str] | None = None
-    expected_patterns: dict[str, ExpectedPattern] | None = None
-    lag_days: dict[str, int] | None = None
+    candidates: list[StrictStr] | None = None
+    expected_patterns: dict[StrictStr, strictly(ExpectedPattern)] | None = None  # type: ignore[valid-type]
+    lag_days: dict[StrictStr, StrictInt] | None = None
 
 
 class Prior:
@@ -108,8 +112,62 @@ class Prior:
         return f"Prior({self.seq})"
 
 
+class FrozenDict(dict):
+    """A dict that cannot be edited. Logged payloads are snapshots, so nothing downstream can rewrite history."""
+
+    def _blocked(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError("a logged payload is read-only")
+
+    __setitem__ = __delitem__ = __ior__ = clear = pop = popitem = setdefault = update = _blocked
+
+    def __deepcopy__(self, memo: dict) -> FrozenDict:
+        return FrozenDict({k: copy.deepcopy(v, memo) for k, v in self.items()})
+
+    def __copy__(self) -> FrozenDict:
+        return FrozenDict(self)
+
+    def __reduce__(self) -> tuple:
+        return (FrozenDict, (dict(self),))
+
+
+class FrozenList(list):
+    """A list that cannot be edited (see ``FrozenDict``)."""
+
+    def _blocked(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError("a logged payload is read-only")
+
+    __setitem__ = __delitem__ = __iadd__ = __imul__ = append = extend = insert = remove = pop = clear = sort = reverse = _blocked
+
+    def __deepcopy__(self, memo: dict) -> FrozenList:
+        return FrozenList(copy.deepcopy(v, memo) for v in self)
+
+    def __copy__(self) -> FrozenList:
+        return FrozenList(self)
+
+    def __reduce__(self) -> tuple:
+        return (FrozenList, (list(self),))
+
+
+def freeze(value: Any) -> Any:
+    """A read-only deep copy of JSON data. Nothing in the result aliases the input."""
+    if isinstance(value, dict):
+        return FrozenDict({str(k): freeze(v) for k, v in value.items()})
+    if isinstance(value, list | tuple):
+        return FrozenList(freeze(v) for v in value)
+    return value
+
+
+def thaw(value: Any) -> Any:
+    """An ordinary, editable deep copy of JSON data (what is sent to a server)."""
+    if isinstance(value, dict):
+        return {str(k): thaw(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [thaw(v) for v in value]
+    return value
+
+
 class LoggedCall(BaseModel):
-    """One MCP tool call. ``result`` is the server's structured content, untouched."""
+    """One MCP tool call. ``result`` is the server's structured content, untouched, held as a read-only snapshot."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -122,6 +180,10 @@ class LoggedCall(BaseModel):
     result: dict[str, Any] | None = None
     error: str | None = None
 
+    def model_post_init(self, context: Any, /) -> None:
+        object.__setattr__(self, "arguments", freeze(self.arguments))
+        object.__setattr__(self, "result", None if self.result is None else freeze(self.result))
+
 
 class StageRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -133,12 +195,26 @@ class StageRecord(BaseModel):
     calls: list[int] = Field(default_factory=list)
 
 
+class ParameterDecision(BaseModel):
+    """A parameter choice the reasoner made for one call (the values are in that call's logged arguments)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tool: str
+    call: int | None = Field(description="The call that used the choice; None when the choice was refused.")
+    names: list[str]
+    rationale: str
+    accepted: bool
+    problem: str | None = None
+
+
 class InvestigationState(BaseModel):
     """The request, the call log and the stage records. The only thing the stages share."""
 
     request: InvestigationRequest
     log: list[LoggedCall] = Field(default_factory=list)
     stages: list[StageRecord] = Field(default_factory=list)
+    decisions: list[ParameterDecision] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list, description="Rejected statements and cross-check failures; never hidden.")
 
     def call(self, seq: int) -> LoggedCall:

@@ -24,6 +24,9 @@ from causelens.agents.result import (
     InvestigationResult,
     LagView,
     LocalizationFinding,
+    ParameterChoiceNote,
+    ShareConfidenceSet,
+    ShareSetPiece,
     Status,
     Strength,
     Unexplained,
@@ -187,7 +190,42 @@ def build_localization(t: Tracer, f: Facts) -> LocalizationFinding | None:
     )
 
 
-_WHY = {"supported": wording.WHY_LEADING, "rejected": wording.WHY_REJECTED, "inconclusive": wording.WHY_ALTERNATIVE}
+_WHY = {"supported": wording.WHY_LEADING, "inconclusive": wording.WHY_ALTERNATIVE}
+
+
+def _rejection(t: Tracer, c: int, base: str, cand: dict[str, Any]) -> tuple[list[Traced], str]:
+    """The grounds the tool rejected on, read from its structured fields, and the matching plain statement of what they mean."""
+    grounds: list[Traced] = []
+    reasons: list[str] = []
+    if cand["exposure"]["rejects"]:
+        grounds.append(t.value(c, f"{base}/exposure/status", "exposure check", "text"))
+        reasons.append(wording.WHY_REJECTED_EXPOSURE)
+    if cand["pattern"]["status"] == "contradicted":
+        grounds.append(t.value(c, f"{base}/pattern/status", "declared pattern check", "text"))
+        reasons.append(wording.WHY_REJECTED_PATTERN)
+    sole = (cand.get("timing") or {}).get("sole_source")
+    if sole and sole["rejected"]:
+        grounds.append(t.value(c, f"{base}/timing/sole_source/rejected", "sole-source timing test rejected", "flag"))
+        reasons.append(wording.WHY_REJECTED_SOLE_SOURCE)
+    return grounds, " ".join(reasons) or wording.WHY_REJECTED_UNSPECIFIED
+
+
+def _share_set(t: Tracer, c: int, base: str, cand: dict[str, Any]) -> ShareConfidenceSet | None:
+    timing = cand.get("timing")
+    if not timing or not timing.get("share_set"):
+        return None
+    b = f"{base}/timing/share_set"
+    pieces = []
+    for j in range(len(timing["share_set"]["pieces"])):
+        pieces.append(ShareSetPiece(
+            lower=t.maybe(c, f"{b}/pieces/{j}/0", "share set lower bound", "share"),
+            upper=t.maybe(c, f"{b}/pieces/{j}/1", "share set upper bound", "share"),
+        ))
+    return ShareConfidenceSet(
+        available=t.value(c, f"{b}/available", "share set available", "flag"), kind=t.maybe(c, f"{b}/kind", "share set kind", "text"),
+        reason=t.maybe(c, f"{b}/reason", "why the share set is unavailable", "text"), level=t.value(c, f"{b}/level", "share set level", "level"),
+        pieces=pieces, note=wording.SHARE_SET_NOTE,
+    )
 
 
 def build_candidates(t: Tracer, f: Facts) -> list[CandidateFinding]:
@@ -197,6 +235,11 @@ def build_candidates(t: Tracer, f: Facts) -> list[CandidateFinding]:
     out = []
     for i, cand in enumerate(doc["candidates"]):
         b = f"/candidates/{i}"
+        grounds, why = _rejection(t, c, b, cand) if cand["verdict"] == "rejected" else ([], _WHY[cand["verdict"]])
+        sole_flag = (
+            t.value(c, f"{b}/timing/sole_source/rejected", "sole-source timing test rejected", "flag")
+            if (cand.get("timing") or {}).get("sole_source") else None
+        )
         out.append(CandidateFinding(
             event=t.value(c, f"{b}/event", "event", "text"), event_type=t.value(c, f"{b}/event_type", "event type", "text"),
             event_date=t.value(c, f"{b}/event_date", "event date", "date"), lag_days=t.value(c, f"{b}/lag_days", "evaluated lag", "days"),
@@ -213,7 +256,7 @@ def build_candidates(t: Tracer, f: Facts) -> list[CandidateFinding]:
                         headline=t.value(c, f"{b}/lag_sensitivity/{j}/headline", "headline at that lag", "text"))
                 for j in range(len(cand["lag_sensitivity"]))
             ],
-            why=_WHY[cand["verdict"]],
+            rejection_grounds=grounds, sole_source_rejected=sole_flag, share_confidence_set=_share_set(t, c, b, cand), why=why,
         ))
     return out
 
@@ -269,11 +312,21 @@ def build_unexplained(t: Tracer, f: Facts, any_supported: bool) -> Unexplained |
                        explained_by_a_supported_event=any_supported, note=note)
 
 
+def stage_outcome(state: InvestigationState, stage: str) -> str | None:
+    """How a stage ended (``done``, ``skipped`` or ``stopped``), or None if it never started."""
+    return next((r.outcome for r in state.stages if r.stage == stage), None)
+
+
+def stopped_stage(state: InvestigationState) -> str | None:
+    return next((r.stage for r in state.stages if r.outcome == "stopped"), None)
+
+
 def build_evidence(t: Tracer, f: Facts, stop: Stop | None) -> EvidenceSummary:
     def rule(reason: str) -> EvidenceSummary:
         return EvidenceSummary(strength="insufficient", base_strength=None, source_call=None, reason=reason, reasons=[], weakest_event=None)
 
-    if stop is not None:
+    late_design_failure = stop is not None and stop.status == "stopped_tool_error" and stopped_stage(t.state) == "recommend"
+    if stop is not None and not late_design_failure:
         return rule({"stopped_change_not_confirmed": wording.STRENGTH_STOPPED_NOT_CONFIRMED,
                      "stopped_insufficient_data": wording.STRENGTH_STOPPED_DATA}.get(stop.status, wording.STRENGTH_TOOL_ERROR))
     if f.testing is None:
@@ -289,9 +342,10 @@ def build_evidence(t: Tracer, f: Facts, stop: Stop | None) -> EvidenceSummary:
     if not cand.get("evidence"):
         return rule(wording.STRENGTH_NO_SUPPORTED)
     b = f"/candidates/{i}"
+    reason = wording.STRENGTH_WEAKEST_SUPPORTED + (" " + wording.STRENGTH_DESIGN_FAILED if late_design_failure else "")
     return EvidenceSummary(
         strength=cand["evidence"]["strength"], base_strength=cand["evidence"]["base_strength"], source_call=f.testing,
-        reason=wording.STRENGTH_WEAKEST_SUPPORTED, reasons=t.texts(f.testing, f"{b}/evidence/reasons", "evidence reason"),
+        reason=reason, reasons=t.texts(f.testing, f"{b}/evidence/reasons", "evidence reason"),
         weakest_event=t.value(f.testing, f"{b}/event", "event", "text"),
     )
 
@@ -338,6 +392,27 @@ def aggregate_assumptions(t: Tracer, f: Facts) -> list[Traced]:
     return out
 
 
+def _estimate_note(state: InvestigationState, f: Facts, any_supported: bool) -> str | None:
+    """Why there is no causal estimate, from how the stages actually ended; None when there is one."""
+    if f.testing is None:
+        test = stage_outcome(state, "test")
+        if test == "skipped":
+            return wording.NO_ESTIMATE_NO_EVENT_LOG
+        return wording.NO_ESTIMATE_INCOMPLETE if test == "stopped" else wording.NO_ESTIMATE_NOT_RUN
+    if not any_supported:
+        return wording.NO_ESTIMATE_NO_SUPPORTED
+    return wording.NO_ESTIMATE_INCOMPLETE if stage_outcome(state, "estimate") == "stopped" else None
+
+
+def _experiment_note(state: InvestigationState) -> str:
+    if stage_outcome(state, "test") == "skipped":
+        return wording.NOT_RUN_NO_EVENT_LOG
+    outcome = stage_outcome(state, "recommend")
+    return {"stopped": wording.NOT_RUN_FAILED, "skipped": wording.NOT_RUN_SKIPPED}.get(
+        outcome or "", wording.NOT_RUN_STOPPED if stopped_stage(state) else wording.NOT_RUN_NO_CANDIDATE_TESTING
+    )
+
+
 def build_report(
     state: InvestigationState, f: Facts, stop: Stop | None, claims: list[ClaimEligibility],
     statements: list[RenderedStatement], rejected: list[str],
@@ -345,23 +420,16 @@ def build_report(
     t = Tracer(state)
     candidates = build_candidates(t, f)
     any_supported = any(c.verdict.value == "supported" for c in candidates)
-    if stop is not None or f.testing is None:
-        note = wording.NO_ESTIMATE_NOT_RUN
-    else:
-        note = None if any_supported else wording.NO_ESTIMATE_NO_SUPPORTED
     experiment = build_experiment(t, f, stop)
-    if experiment is not None:
-        experiment_note = None
-    else:
-        experiment_note = wording.NOT_RUN_STOPPED if stop is not None else wording.NOT_RUN_NO_CANDIDATE_TESTING
     return InvestigationResult(
         question=state.request.question, request=state.request, status=stop.status if stop else "completed",
-        stopped_reason=stop.reason if stop else None, stopped_call=stop.call if stop else None,
+        stopped_reason=stop.reason if stop else None, stopped_stage=stopped_stage(state), stopped_call=stop.call if stop else None,
         dataset=build_dataset(t, f), data_quality=build_quality(t, f), confirmed_change=build_confirm(t, f),
         change_point=build_change_point(t, f), localization=build_localization(t, f), candidates=candidates,
         alternatives_considered=t.texts(f.testing, "/alternatives", "alternative explanation") if f.testing else [],
-        causal_estimates=build_estimates(t, f, claims) if f.testing else [], causal_estimate_note=note,
-        unexplained=build_unexplained(t, f, any_supported), evidence=build_evidence(t, f, stop), recommended_experiment=experiment, experiment_note=experiment_note,
-        assumptions=aggregate_assumptions(t, f), statements=statements, rejected_statements=rejected, stages=list(state.stages),
-        n_calls=len(state.log),
+        causal_estimates=build_estimates(t, f, claims) if f.testing else [], causal_estimate_note=_estimate_note(state, f, any_supported),
+        unexplained=build_unexplained(t, f, any_supported), evidence=build_evidence(t, f, stop), recommended_experiment=experiment,
+        experiment_note=None if experiment is not None else _experiment_note(state),
+        assumptions=aggregate_assumptions(t, f), statements=statements, rejected_statements=rejected,
+        parameter_choices=[ParameterChoiceNote(**d.model_dump()) for d in state.decisions], stages=list(state.stages), n_calls=len(state.log),
     )

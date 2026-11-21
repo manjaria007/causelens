@@ -348,8 +348,8 @@ def investigate_with(files, req: InvestigationRequest) -> Investigation:
 
 # --------------------------------------------------------------------------- the reasoner cannot get a number or a cause into the report
 
-class Scripted:
-    """A stand-in for a model: returns whatever statements it is given."""
+class Scripted(TemplateReasoner):
+    """A stand-in for a model: interprets as scripted and keeps the tools' parameter defaults."""
 
     def __init__(self, statements: list[Statement]):
         self.statements = statements
@@ -482,3 +482,22 @@ def test_a_standalone_estimate_that_differs_from_the_embedded_one_is_reported(fi
     assert inv.state.notes and "differs from the one embedded" in inv.state.notes[0]
     # The server also refuses to build on the tampered result, so the run stops at the experiment design.
     assert inv.result.status == "stopped_tool_error" and inv.state.call(inv.result.stopped_call).tool == "design_experiment"
+
+
+def test_the_same_investigation_runs_over_streamable_http_and_gives_the_same_numbers(files, reference_run):
+    from mcp_support import RunningServer
+
+    from causelens.mcp import DatasetConfig, DatasetRegistry
+
+    server = RunningServer(DatasetRegistry([DatasetConfig("reference", files[0], files[1])]))
+    try:
+        async def go():
+            async with McpToolClient(server.url) as client:
+                return await investigate(request(), client)
+
+        over_http = asyncio.run(go())
+    finally:
+        server.stop()
+    assert over_http.result.status == "completed"
+    assert over_http.result.model_dump_json() == reference_run.result.model_dump_json()
+    assert [c.model_dump_json() for c in over_http.state.log] == [c.model_dump_json() for c in reference_run.state.log]

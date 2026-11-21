@@ -103,6 +103,28 @@ class LagView(_Frozen):
     headline: Traced
 
 
+class ShareSetPiece(_Frozen):
+    """One interval of a confidence set; an endpoint the tool left open (unbounded) is ``None``."""
+
+    lower: Traced | None
+    upper: Traced | None
+
+
+class ShareConfidenceSet(_Frozen):
+    """The confidence set for the share of the localized change that begins at the candidate's onset date (Requirement 5.3).
+
+    It can be bounded, disconnected or unbounded, and is unavailable, with a reason, when the contrast cannot be estimated. It
+    describes calendar steps under the lag model, not a release's causal share.
+    """
+
+    available: Traced
+    kind: Traced | None
+    reason: Traced | None
+    level: Traced
+    pieces: list[ShareSetPiece]
+    note: str
+
+
 class CandidateFinding(_Frozen):
     event: Traced
     event_type: Traced
@@ -117,6 +139,11 @@ class CandidateFinding(_Frozen):
     attribution_note: Traced
     evidence_strength: Traced | None
     lag_sensitivity: list[LagView]
+    rejection_grounds: list[Traced] = Field(
+        description="For a rejected candidate, each ground the tool rejected on: exposure 'disjoint', pattern 'contradicted', or the sole-source timing test."
+    )
+    sole_source_rejected: Traced | None = Field(description="Whether the timing contrast rejected the event as the sole source; None when it was not run.")
+    share_confidence_set: ShareConfidenceSet | None
     why: str = Field(description="Why the candidate was kept as the leading explanation, kept as an alternative, or rejected.")
 
 
@@ -139,6 +166,17 @@ class CausalEstimate(_Frozen):
     attribution_label: str
     claim: ClaimEligibility
     matches_candidate_test: bool = Field(description="The standalone difference-in-differences equals the one embedded in the candidate test.")
+
+
+class ParameterChoiceNote(_Frozen):
+    """A parameter choice by the reasoner. The values are in the logged arguments of ``call``; they are not repeated here."""
+
+    tool: str
+    call: int | None
+    names: list[str]
+    rationale: str
+    accepted: bool
+    problem: str | None
 
 
 class Unexplained(_Frozen):
@@ -187,6 +225,7 @@ class InvestigationResult(_Frozen):
     request: InvestigationRequest
     status: Status
     stopped_reason: str | None
+    stopped_stage: str | None = Field(description="The stage that stopped, from the stage records.")
     stopped_call: int | None = Field(description="The log entry of the failed call, when a tool error stopped the run.")
     dataset: DatasetFacts | None
     data_quality: DataQualityNotes | None
@@ -204,5 +243,6 @@ class InvestigationResult(_Frozen):
     assumptions: list[Traced]
     statements: list[RenderedStatement]
     rejected_statements: list[str]
+    parameter_choices: list[ParameterChoiceNote]
     stages: list[StageRecord]
     n_calls: int

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import string
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import date
 from typing import Any, Literal
 
@@ -26,6 +26,11 @@ from pydantic import (
     StrictStr,
 )
 
+from causelens.agents.claims import (
+    ClaimEligibility,
+    ref_belongs_to_claim,
+    required_refs,
+)
 from causelens.agents.state import InvestigationState
 
 Scalar = StrictBool | StrictInt | StrictFloat | StrictStr
@@ -211,9 +216,16 @@ class RenderedStatement(BaseModel):
     statement: Statement
 
 
+def _parse(text: str) -> list[tuple[str, str | None, str | None, str | None]]:
+    try:
+        return list(string.Formatter().parse(text))
+    except ValueError as exc:  # an unmatched brace
+        raise TraceError(f"the template is malformed: {exc}") from None
+
+
 def _placeholders(text: str) -> list[str]:
     names: list[str] = []
-    for _, field, spec, conversion in string.Formatter().parse(text):
+    for _, field, spec, conversion in _parse(text):
         if field is None:
             continue
         if not field.isidentifier() or spec or conversion:
@@ -222,16 +234,39 @@ def _placeholders(text: str) -> list[str]:
     return names
 
 
-def validate_statement(statement: Statement, state: InvestigationState, *, allowed_claim_calls: frozenset[int] = frozenset()) -> None:
+def check_prose(text: str) -> None:
+    """The rules for text a reasoner writes outside a statement (a parameter rationale): no digits, no cause-asserting words."""
+    if re.search(r"\d", text):
+        raise TraceError("prose may not contain digits; numbers come only from references into the log")
+    match = CAUSAL_WORDS.search(text)
+    if match:
+        raise TraceError(f"wording asserts a cause: {match.group(0)!r}")
+
+
+def event_names(state: InvestigationState) -> set[str]:
+    """Every event name the log mentions. A causal sentence must take its event from a reference, never type it."""
+    names: set[str] = set()
+    for call in state.log:
+        if call.is_error or call.result is None:
+            continue
+        for key in ("candidates",):
+            for item in call.result.get(key, []) if isinstance(call.result.get(key), list) else []:
+                if isinstance(item, dict):
+                    names.update(str(item[k]) for k in ("event", "name") if k in item)
+    return {n for n in names if n}
+
+
+def validate_statement(statement: Statement, state: InvestigationState, *, allowed_claims: Sequence[ClaimEligibility] = ()) -> None:
     """Raise ``TraceError`` unless the statement obeys the numeric and wording rules.
 
-    ``allowed_claim_calls`` are the log positions of difference-in-differences results whose checks passed (see
-    ``causelens.agents.claims``). A ``causal_claim`` must reference one of them and quote at least one of its assumptions.
+    ``allowed_claims`` are the claims ``assess_claim`` allowed (see ``causelens.agents.claims``). A ``causal_claim`` sentence is
+    bound to exactly one of them: it must quote that claim's event, lag, onset, estimate, interval, level, sample size and every
+    assumption, name the design, quote nothing about another candidate, and not type an event name.
     """
     names = _placeholders(statement.text)
     if set(names) != set(statement.refs):
         raise TraceError(f"placeholders {sorted(set(names))} do not match references {sorted(statement.refs)}")
-    literal = "".join(piece for piece, *_ in string.Formatter().parse(statement.text))
+    literal = "".join(piece for piece, *_ in _parse(statement.text))
     if re.search(r"\d", literal):
         raise TraceError("a sentence template may not contain digits; bind the number to a reference into the log")
     for name, ref in statement.refs.items():
@@ -240,16 +275,32 @@ def validate_statement(statement: Statement, state: InvestigationState, *, allow
             raise TraceError(f"{{{name}}} resolves to {type(value).__name__}, not a value")
         if ref.fmt not in ("text", "date") and not (isinstance(value, int | float) and not isinstance(value, bool)):
             raise TraceError(f"{{{name}}} uses format {ref.fmt!r} but call {ref.call} {ref.path} is not a number")
-    asserts_cause = bool(CAUSAL_WORDS.search(literal))
+    asserts_cause = CAUSAL_WORDS.search(literal)
     if statement.kind != "causal_claim":
         if asserts_cause:
-            raise TraceError(f"wording asserts a cause outside a causal_claim: {CAUSAL_WORDS.search(literal).group(0)!r}")  # type: ignore[union-attr]
+            raise TraceError(f"wording asserts a cause outside a causal_claim: {asserts_cause.group(0)!r}")
         return
-    cited = {ref.call for ref in statement.refs.values()} & allowed_claim_calls
-    if not cited:
-        raise TraceError("a causal_claim must cite a difference-in-differences result whose checks passed")
-    if not any(ref.call in cited and ref.path.startswith("/assumptions/") for ref in statement.refs.values()):
-        raise TraceError("a causal_claim must quote the assumptions of the design next to the number")
+    _validate_claim(statement, state, literal, allowed_claims)
+
+
+def _validate_claim(statement: Statement, state: InvestigationState, literal: str, allowed: Sequence[ClaimEligibility]) -> None:
+    cited = {ref.call for ref in statement.refs.values()}
+    claims = [c for c in allowed if c.did_call in cited]
+    if len(claims) != 1:
+        raise TraceError("a causal_claim must cite exactly one difference-in-differences result whose checks passed")
+    claim = claims[0]
+    if "difference-in-differences" not in literal.lower():
+        raise TraceError("a causal_claim must name its design (difference-in-differences)")
+    typed = [n for n in event_names(state) if n.lower() in literal.lower()]
+    if typed:
+        raise TraceError(f"a causal_claim may not type an event name ({typed[0]!r}); the event comes from a reference")
+    quoted = {(r.call, r.path, r.fmt) for r in statement.refs.values()}
+    missing = [name for name, want in required_refs(state, claim).items() if want not in quoted]
+    if missing:
+        raise TraceError(f"the statement is not bound to the claim for {claim.event!r}: it does not quote {sorted(missing)}")
+    foreign = [r.path for r in statement.refs.values() if not ref_belongs_to_claim(claim, r.call, r.path)]
+    if foreign:
+        raise TraceError(f"the statement is not bound to the event of its estimate ({claim.event!r}); it quotes {foreign[0]!r}")
 
 
 def render(statement: Statement, state: InvestigationState) -> str:
@@ -258,4 +309,7 @@ def render(statement: Statement, state: InvestigationState) -> str:
     for name, ref in statement.refs.items():
         value = _resolve(state, ref.call, ref.path)
         values[name] = FORMATS[ref.fmt](value)
-    return statement.text.format_map(values)
+    try:
+        return statement.text.format_map(values)
+    except (ValueError, KeyError, IndexError) as exc:
+        raise TraceError(f"the template cannot be rendered: {exc}") from None

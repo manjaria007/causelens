@@ -31,6 +31,42 @@ class ClaimEligibility(BaseModel):
     design: str = DESIGN
 
 
+def claim_base(claim: ClaimEligibility) -> str:
+    """The pointer of the candidate the claim is about, for example ``/candidates/1``."""
+    return claim.verdict_path.rsplit("/", 1)[0]
+
+
+def required_refs(state: InvestigationState, claim: ClaimEligibility) -> dict[str, tuple[int, str, str]]:
+    """What a causal sentence for this claim must quote, as ``name -> (call, pointer, format)``.
+
+    The event, its evaluated lag and onset come from the candidate test; the estimate, its interval, level and sample size come
+    from the difference-in-differences call; and every assumption of that call is quoted. A sentence that lacks any of these, or
+    quotes another candidate, is not this claim.
+    """
+    base = claim_base(claim)
+    did = state.call(claim.did_call).result
+    assert did is not None
+    refs: dict[str, tuple[int, str, str]] = {
+        "event": (claim.verdict_call, f"{base}/event", "text"),
+        "onset": (claim.verdict_call, f"{base}/onset_date", "date"),
+        "lag": (claim.verdict_call, f"{base}/lag_days", "count"),
+        "effect": (claim.did_call, "/effect_pp/estimate", "pp"),
+        "lower": (claim.did_call, "/effect_pp/lower", "pp"),
+        "upper": (claim.did_call, "/effect_pp/upper", "pp"),
+        "level": (claim.did_call, "/effect_pp/level", "level"),
+        "n": (claim.did_call, "/n_obs", "count"),
+    }
+    refs.update({f"a{i}": (claim.did_call, f"/assumptions/{i}", "text") for i in range(len(did["assumptions"]))})
+    return refs
+
+
+def ref_belongs_to_claim(claim: ClaimEligibility, call: int, path: str) -> bool:
+    """Whether a reference may appear in a sentence about this claim (nothing about another candidate may)."""
+    if call == claim.verdict_call:
+        return path.startswith((claim_base(claim) + "/", "/focal/"))
+    return call in (claim.did_call, claim.pre_trend_call, claim.placebo_call)
+
+
 def assess_claim(
     state: InvestigationState, *, event: str, verdict_call: int, verdict_path: str, did_call: int, pre_trend_call: int, placebo_call: int,
 ) -> ClaimEligibility:

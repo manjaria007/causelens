@@ -641,3 +641,51 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   `moderate` strength, not `strong`, because of the ambiguity cap. Display formats fix decimals (for example 3 for pp); the stored
   values are exact. A 3-arm experiment on a weak effect can come back with a duration of years (the tool's own figure); the
   design warnings are passed through as caveats.
+
+### Task 8 review round 1 (PR #9, review of `f62a8b4`)
+
+- Order of work: failing regressions first (`tests/test_agents_review.py`, 59 tests; 39 failed on `f62a8b4`, the rest were guards that
+  already held), the fixes, then the agents tests, then the full suite once after the last code change. Only `causelens/agents/`, its
+  tests and docs changed; analytics, the MCP adapters, simulator, data and steering are untouched.
+- Findings and what changed:
+  1. **A rejected event could receive a causal claim.** Confirmed: a claim citing Checkout's DiD but naming Hero's event passed. A
+     `causal_claim` is now bound to exactly one eligible `ClaimEligibility`: it must quote that claim's event, lag, onset, estimate,
+     interval, level, sample size and every assumption (each in its required format), name the design, quote nothing about another
+     candidate, and not type an event name. The spec for what it must quote is `claims.required_refs`.
+  2. **The LLM layer was unfinished.** Added `choose_parameters` to the `Reasoner` protocol (a short allow-list in `parameters.py`, strict
+     validation, refused whole, recorded), interpretation right after each role instead of after the whole run, and `ModelReasoner` over a
+     `TextModel` protocol (prompt = `Role.system_prompt()` with the rules verbatim plus a digest of the log and the allowed claims; strict
+     JSON parsing; same validation as any statement). **No provider adapter ships and no hosted model was run**; the tests use scripted
+     models, so real-model behavior is unknown. I chose not to ship an adapter I could not run.
+  3. **A combined statistic was credited to one segment.** The localization sentence now lists the whole selected set and says the figures
+     are for the set.
+  4. **Rejection wording overstated the conclusion.** Rejected candidates now carry the grounds the tool rejected on (exposure, declared
+     pattern, sole-source timing test) and a matching statement; `sole_source_rejected` is reported separately.
+  5. **Share confidence sets were missing.** Each tested candidate now carries its set (level, kind, pieces with open ends as `None`) or the
+     tool's reason when unavailable.
+  6. **Connection failures escaped.** `Toolbox` logs any ordinary exception from the client as a failed call. Reproducing it showed a second
+     problem: the SDK cancels the task that opened the session when its transport fails, which arrived as a `CancelledError` that looked like
+     the caller's own cancellation. `McpToolClient` now runs the session in its own task and fails calls with `SessionClosed`; a real
+     cancellation still propagates (tested).
+  7. **Malformed reasoner text crashed the run.** Parse and render errors are `TraceError`s and the statement is rejected and recorded.
+  8. **Logged payloads were mutable.** Arguments and results are copied on the way in and out and stored read-only. The `log` list itself is
+     still append-only by convention.
+  9. **Request parsing coerced.** `Window` uses the server's `IsoDate`; `lag_days` is `StrictInt`; strings are strict and declared patterns
+     use the server's strict-JSON validation.
+  10. **Late failures gave false history.** Notes and evidence are derived from how the stages ended. A failure at the design call keeps the
+     tests' evidence and the estimate and says the design failed; a failure during estimation says the estimate did not complete; no-event-log
+     datasets say so. The result has `stopped_stage`.
+- Decisions: the tunable parameters are only the bootstrap size, minimum days, the event lead window (two tools), the explaining-set threshold
+  and the pair option. I excluded alpha, level, power, MDE, seeds and anything the user declares. A refused parameter choice is not trimmed
+  to its valid part.
+- Mistakes of mine caught on the way: my first `McpToolClient.__aexit__` fix swallowed the wrong error and left a `CancelledError` (found by
+  the real closed-server test); a first mutation of the malformed-template check was equivalent to the original and showed "missed", so I
+  rewrote it; an assertion in a new test compared against arguments the pipeline legitimately sends.
+- Mutation checks: 18 on the new code (foreign refs, missing claim parts, typed event name, design name not required, payloads not frozen,
+  transport errors escaping, malformed template crash, render crash, pattern ground dropped, share set dropped, lax window, lax lag, estimate
+  note always "not run", unknown parameter allowed, interpretation only at the end, first segment only, late failure dropping evidence). All
+  caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,209 passed (186 s, none skipped), run once after the last code change; `.venv/bin/python -m
+  ruff check causelens tests` passed. That is 113 more tests than the 1,096 before this round. The orchestrator now also runs over
+  Streamable HTTP with byte-identical results to in-process and stdio. No statistical calibration was rerun; analytics are unchanged.
+- Not verified: any hosted model behind `ModelReasoner`; running the orchestrator inside Kiro.

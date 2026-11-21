@@ -2,16 +2,19 @@
 
 The orchestrator runs the stages in a fixed order and hands each role a ``Toolbox`` limited to that role's tools. Control
 flow reads only logged results: it stops when the change is not confirmed (Requirement 2.3), skips candidate testing when the
-dataset has no event log, and makes a causal estimate only for a candidate the tests support. It calls no model and computes no
-statistic; ``Reasoner`` writes the interpretive text, and everything it writes is validated before it enters the report.
+dataset has no event log, and makes a causal estimate only for a candidate the tests support. It computes no statistic. The
+``Reasoner`` (the design's LLM layer) is consulted at two points: before a tunable tool call, to choose parameters, and right after
+each role's stages, to interpret what that role found. Everything it returns is validated before it is used.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
 from causelens.agents import wording
 from causelens.agents.claims import ClaimEligibility, assess_claim
+from causelens.agents.parameters import TUNABLE, ParameterError, validate_choice
 from causelens.agents.reasoner import Context, Reasoner, TemplateReasoner
 from causelens.agents.report import EstimateCalls, Facts, Stop, build_report
 from causelens.agents.result import InvestigationResult
@@ -20,6 +23,7 @@ from causelens.agents.state import (
     InvestigationRequest,
     InvestigationState,
     LoggedCall,
+    ParameterDecision,
     Prior,
     Stage,
 )
@@ -43,17 +47,70 @@ class Investigation:
 
 
 class _Run:
-    def __init__(self, request: InvestigationRequest, client: ToolClient):
+    def __init__(self, request: InvestigationRequest, client: ToolClient, reasoner: Reasoner):
         self.state = InvestigationState(request=request)
         self.box = Toolbox(client, self.state)
+        self.reasoner = reasoner
         self.facts = Facts()
         self.claims: list[ClaimEligibility] = []
+        self.statements: list[RenderedStatement] = []
+        self.rejected: list[str] = []
+        self.interpreted: set[str] = set()
         self.stage: Stage = "validate"
         self.role: Role = DETECTIVE
 
+    def context(self) -> Context:
+        return Context(state=self.state, claims=tuple(self.claims))
+
     async def call(self, role: Role, stage: Stage, tool: str, **arguments: Any) -> LoggedCall:
+        """Make a call. For a tunable tool the reasoner may first choose parameters; a refused choice is recorded and not used."""
         self.stage, self.role = stage, role
+        if tool in TUNABLE:
+            arguments = {**arguments, **await self._choose(role, tool, arguments)}
         return await self.box.call(role, stage, tool, **arguments)
+
+    async def _choose(self, role: Role, tool: str, fixed: dict[str, Any]) -> dict[str, Any]:
+        try:
+            choice = await asyncio.to_thread(self.reasoner.choose_parameters, role, tool, self.context())
+        except Exception as exc:  # noqa: BLE001 - a failing model must not stop the investigation; the failure is recorded
+            self.rejected.append(f"{role.name} parameters for {tool}: the reasoner failed ({type(exc).__name__}: {exc})")
+            return {}
+        if choice is None or not choice.arguments:
+            return {}
+        names = sorted(choice.arguments)
+        try:
+            chosen = validate_choice(tool, choice)
+            if set(chosen) & set(fixed):
+                raise ParameterError("a parameter the orchestrator sets cannot be chosen")
+        except ParameterError as exc:
+            self.state.decisions.append(ParameterDecision(
+                tool=tool, call=None, names=names, rationale=choice.rationale, accepted=False, problem=str(exc)))
+            return {}
+        self.state.decisions.append(ParameterDecision(
+            tool=tool, call=len(self.state.log) + 1, names=names, rationale=choice.rationale, accepted=True))
+        return chosen
+
+    async def interpret(self, role: Role) -> None:
+        """Ask the reasoner for the role's text and keep only the statements that pass validation."""
+        if role.name in self.interpreted:
+            return
+        self.interpreted.add(role.name)
+        context = self.context()
+        allowed = [c for c in self.claims if c.allowed]
+        try:
+            proposed = await asyncio.to_thread(self.reasoner.interpret, role, context)
+        except Exception as exc:  # noqa: BLE001 - recorded, never hidden; the structured result does not depend on the text
+            self.rejected.append(f"{role.name}: the reasoner failed ({type(exc).__name__}: {exc})")
+            return
+        for statement in proposed:
+            try:
+                if statement.role != role.name:
+                    raise TraceError(f"the statement is for the {statement.role} role, not {role.name}")
+                validate_statement(statement, self.state, allowed_claims=allowed)
+                self.statements.append(RenderedStatement(
+                    role=statement.role, kind=statement.kind, text=render(statement, self.state), statement=statement))
+            except TraceError as exc:
+                self.rejected.append(f"{statement.role} {statement.kind}: {exc}")
 
     @property
     def windows(self) -> dict[str, Any]:
@@ -166,39 +223,23 @@ class _Run:
         s.stage("recommend", EXPERIMENT_DESIGNER.name, "done", "no single leading candidate: one arm per open candidate" if each else None)
 
 
-def _statements(run: _Run, reasoner: Reasoner, roles: list[Role]) -> tuple[list[RenderedStatement], list[str]]:
-    """Ask the reasoner for each role's text and keep only what passes validation."""
-    state = run.state
-    allowed = frozenset(c.did_call for c in run.claims if c.allowed)
-    context = Context(state=state, claims=tuple(run.claims))
-    kept: list[RenderedStatement] = []
-    rejected: list[str] = []
-    for role in roles:
-        for statement in reasoner.interpret(role, context):
-            try:
-                validate_statement(statement, state, allowed_claim_calls=allowed)
-                kept.append(RenderedStatement(role=statement.role, kind=statement.kind, text=render(statement, state), statement=statement))
-            except TraceError as exc:
-                rejected.append(f"{statement.role} {statement.kind}: {exc}")
-    return kept, rejected
-
-
 async def investigate(request: InvestigationRequest, client: ToolClient, reasoner: Reasoner | None = None) -> Investigation:
     """Run one investigation through ``client`` (an MCP session) and return the log and the structured result."""
-    reasoner = reasoner or TemplateReasoner()
-    run = _Run(request, client)
+    run = _Run(request, client, reasoner or TemplateReasoner())
     stop: Stop | None = None
     try:
         stop = await run.detective()
+        await run.interpret(DETECTIVE)
         if stop is None:
             await run.scientist()
+            await run.interpret(SCIENTIST)
             await run.designer()
+            await run.interpret(EXPERIMENT_DESIGNER)
     except ToolCallError as exc:
         run.state.stage(run.stage, run.role.name, "stopped", "a tool call failed")
         stop = Stop("stopped_tool_error", wording.STRENGTH_TOOL_ERROR, exc.call.seq)
-    roles = [DETECTIVE] + ([SCIENTIST, EXPERIMENT_DESIGNER] if stop is None else [])
-    statements, rejected = _statements(run, reasoner, roles)
-    result = build_report(run.state, run.facts, stop, run.claims, statements, rejected)
+        await run.interpret(run.role)  # the role that was working still reports what it found before the failure
+    result = build_report(run.state, run.facts, stop, run.claims, run.statements, run.rejected)
     verify_traces(result, run.state)
     return Investigation(state=run.state, result=result)
 
