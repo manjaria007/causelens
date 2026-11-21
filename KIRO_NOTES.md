@@ -562,3 +562,22 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
 - Order of work: failing regressions on `f71024a`, the three fixes, the review file, the whole MCP block, then the full suite once.
   No analytics code changed.
 - **Kiro tool call: still not verified.** Unchanged from the previous round; Task 8 stays pending until it is.
+
+### Task 7: native MCP verification from Kiro CLI
+
+- **Kiro tool call: verified in Kiro CLI.** The four calls were made directly from a Kiro CLI session against the `causelens` MCP
+  server, not through pytest or a script. Environment: Kiro CLI 3.5.0, Python 3.14.5 (`.venv`), on my Mac.
+- `list_datasets` returned one dataset, `reference`, with 5,888 rows, dates 2026-08-01 to 2026-10-31 and 5 events.
+  Fingerprints: metrics `7c8fe7196f23a9ba5b65b48ad3de8cc458c469d72c2f1ebc997e33509649f641`, events
+  `6611f41eb7d72f7bbc14643701c865e0492040e398f3ca018851950a0f7f38c8`.
+- `power_analysis` with `baseline` 0.05 and `mde_pp` 1.0 returned 8,158 sessions per arm (16,316 in total) for target power 0.8,
+  with achieved power 0.8000138678522831, `approximation_reliable` true and no warnings.
+- `check_data_quality` on `reference` returned `excluded_dates` exactly `["2026-09-20"]`. The `device=desktop` flag on that date is
+  a `possible_tracking_issue`: conversion 1.68% against a rolling baseline of 4.22% (60.21% below, robust z = -16.4) while
+  sessions were normal (18,276 against 16,842). It is linked to the incident "Analytics tag deploy" with the same segment
+  (`device=desktop`). The tool states this is a coincidence in time and scope, not proof that the incident caused the shift. Six
+  more flags on the same date (chrome, edge, organic, paid, new, returning) were returned and are not reproduced here.
+- `power_analysis` with the JSON boolean `mde_pp: true` was rejected, as intended, with
+  `Input should be a valid number [type=float_type, input_value=True, input_type=bool]`.
+- **Status.** The Kiro CLI workaround is verified. Kiro Web issue #12523 remains unresolved; this check says nothing about it.
+- The Mac-specific edit to `.kiro/settings/mcp.json` is deliberately not committed. Task 8 has not been started.
