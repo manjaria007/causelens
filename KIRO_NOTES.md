@@ -711,3 +711,55 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   math.isfinite(value)`). My version called `math.isfinite` on every number, and for an integer such as `10**400` it raises
   `OverflowError`, which nothing caught, so a reasoner's oversized integer would have crashed the run. It is now refused by the range
   check like any out-of-range integer. Two new regressions fail on the previous code and pass now. Full suite: 1,221 passed; Ruff clean.
+
+## Task 9: ground-truth evaluation (branch `task-9-ground-truth-eval`)
+
+- Built from `origin/main` at `82f9f42` (PR #9, Task 8, merged; checked with `git merge-base --is-ancestor` after a fetch). The branch
+  name you gave was `task-9-investigation-ui`; Task 9 in `tasks.md` is the evaluation (the console is Task 10), so I used
+  `task-9-ground-truth-eval` as agreed. Your Mac `.kiro/settings/mcp.json` edit stayed unstaged and uncommitted. Task 10 is not started.
+- Read first: `tasks.md`, requirements 10.1-10.3, the design's end-to-end evaluation line, all three steering files, `data/README.md`,
+  the simulator, and the Task 8 orchestrator and result model.
+- What it does: `python -m causelens.eval --seeds 20` (`causelens/eval/`) generates seeds 42 to 61 in memory, writes only the metrics and
+  events files to a private temp directory, serves them through the Task 7 MCP server, runs the Task 8 orchestrator, and grades the
+  structured result against the answer key. The key is loaded before the run, never given to the server or the orchestrator, and used only for grading. Seed 42 is graded against `data/ground_truth.json` itself, which is checked
+  to equal what the simulator produces for that seed (a stale or edited file is an error, exit 2); other seeds use their own generated key.
+- Five criteria (10.2): only Checkout v4.2 supported; localized to exactly mobile x Safari; Homepage hero refresh `rejected`; 2026-09-20
+  flagged and excluded; the interval for Checkout covers the seed's true segment effect. A criterion passes only on positive evidence,
+  so a stopped run, a missing estimate or no localization fails it. Per-criterion pass counts, rates and Wilson 95% intervals are
+  reported (10.3), plus wrong-event-supported counts, status and strength counts, and how often the interval contains the true effect among runs that produced one.
+- Decisions the spec did not dictate: seeds are consecutive from 42 (the reference is included, not cherry-picked); fewer than 20 seeds
+  needs `--allow-fewer-seeds` and the report says it is below the minimum; the exit status follows the reference seed only, and the
+  rates are reported, not gated, because no threshold was specified. I did not tune anything to improve the rates; no analytics changed.
+- **Result on seeds 42-61 (inconvenient numbers included):** all criteria pass in 14/20 (70%, Wilson [48.1%, 85.5%]).
+  `identifies_cause` 16/20, `localizes_segment` 19/20, `rejects_decoy` 18/20, `flags_data_quality` 20/20, `ci_covers_truth` 14/20.
+  The reference seed passes all five. A wrong event was supported in 0/20. Four runs (43, 45, 52, 53) supported no candidate (strength
+  `insufficient`, the investigation recommends an experiment); seed 57's interval missed the truth by 0.033 pp; seed 59 localized to
+  `browser=safari`, a broader set than mobile x Safari. Among the 16 runs with an interval, 14 contain the true effect (88%, Wilson
+  [64.0%, 96.5%]). No run reached `strong`; all 16 supported runs are `moderate` and release-ambiguous. Details and caveats are in
+  `docs/evaluation.md`.
+- Mistakes of mine caught by my own checks: the Wilson interval returned a lower bound of 3.5e-18 for 0 passes in 63 (rounding put it
+  above the observed rate), found by a property test and fixed by clamping to the rate; my first runner generated each seed twice
+  (once for the key, once for the files); a first mutation run showed "any one decoy rejected" would pass because the reference key
+  has only one decoy, so there is now a test with a two-decoy key.
+- Mutation checks (11: identifies via membership, localization by superset, one-decoy rejection, flagged-but-not-excluded,
+  exclusive interval ends, another event's interval, key not verified, exit status ignoring the reference, minimum not flagged,
+  wrong events not listed, unclamped interval). Ten were caught at once; the decoy one needed the new test, and all 11 are caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,265 passed (195 s), once after the last code change; `.venv/bin/python -m ruff check
+  causelens tests` passed. 44 new tests are in `tests/test_eval.py`. The 20-seed run (about 20 s) is a command, not part of the suite.
+- Not verified: behaviour on real data or on scenarios other than the planted one (those are in `docs/candidate-testing.md`); a hosted
+  model as the reasoner (the evaluation uses the template reasoner).
+
+### Task 9 review round 1 (PR #10)
+
+- **Negative first seed crashed.** `--first-seed -1 --seeds 1 --allow-fewer-seeds` reached numpy and died with a traceback. The command now
+  refuses a negative first seed with a message and exit 2, and `evaluate()` refuses negative seeds for library callers. Reproduced with a
+  failing regression first; seed 0 is accepted (tested).
+- **Key timing wording.** I had written that the key is read after the investigation. It is loaded before the run (for seed 42, also
+  verified then). The accurate statement, now in `runner.py`, `grading.py`, `docs/evaluation.md` and these notes, is that it is never given
+  to the server or the orchestrator and is used only for grading. A test checks the wording. The reviewer found no actual exposure.
+- **Coverage wording.** "Interval coverage ... against a nominal 95%" over-read 14/16. Those 16 are the runs where the investigation
+  supported a candidate, a selection it made itself, and seed 59's interval is for a broader focal group than the planted segment. The
+  report field is now `containment_given_estimate`, the text says the count is containment among selected runs and not a measure of the
+  interval's coverage, and the docs point to the Task 5 null calibration for the coverage property. A test pins the wording.
+- Results: `.venv/bin/python -m pytest -q`: 1,271 passed (199 s), once after the last code change; `.venv/bin/python -m ruff check
+  causelens tests` passed. The 20-seed result is unchanged (14/20 all criteria; 16/20, 19/20, 18/20, 20/20, 14/20 by criterion).
