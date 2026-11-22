@@ -73,7 +73,7 @@ def validate_choice(tool: str, choice: ParameterChoice) -> dict[str, Any]:
         ok = type(value) is int if item.kind == "int" else type(value) in (int, float)
         if not ok:
             raise ParameterError(f"{name} must be a JSON {'integer' if item.kind == 'int' else 'number'}")
-        if not math.isfinite(value):
+        if type(value) is float and not math.isfinite(value):
             raise ParameterError(f"{name} must be a finite number")
         if (item.low is not None and value < item.low) or (item.high is not None and value > item.high):
             raise ParameterError(f"{name} is outside the permitted range")

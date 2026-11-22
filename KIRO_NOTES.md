@@ -706,3 +706,8 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
 - Results: `.venv/bin/python -m pytest -q`: 1,219 passed (191 s), once after the last code change; `.venv/bin/python -m ruff check
   causelens tests` passed. No calibration was rerun; analytics are unchanged.
 - Not verified: a live hosted model behind `ModelReasoner` (unchanged).
+
+- Follow-up to round 2 (suggested by the reviewer): the finite check now applies to floats only (`type(value) is float and not
+  math.isfinite(value)`). My version called `math.isfinite` on every number, and for an integer such as `10**400` it raises
+  `OverflowError`, which nothing caught, so a reasoner's oversized integer would have crashed the run. It is now refused by the range
+  check like any out-of-range integer. Two new regressions fail on the previous code and pass now. Full suite: 1,221 passed; Ruff clean.

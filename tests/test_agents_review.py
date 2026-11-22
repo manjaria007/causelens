@@ -488,3 +488,23 @@ def test_rereview2_a_model_that_replies_with_nan_is_refused_too(files):
 
     inv = asyncio.run(go())
     assert inv.result.status == "completed" and [n.accepted for n in inv.result.parameter_choices] == [False]
+
+
+@pytest.mark.parametrize("huge", [10**400, -(10**400)])
+def test_rereview2_an_integer_too_large_for_a_float_is_refused_not_a_crash(files, huge):
+    from causelens.agents import ParameterChoice, ParameterError
+    from causelens.agents.parameters import validate_choice
+
+    with pytest.raises(ParameterError, match="outside the permitted range"):
+        validate_choice("confirm_change", ParameterChoice(arguments={"n_bootstrap": huge}, rationale="Many."))
+
+    class Chooser(TemplateReasoner):
+        def choose_parameters(self, role, tool, context):
+            return ParameterChoice(arguments={"n_bootstrap": huge}, rationale="Many.") if tool == "confirm_change" else None
+
+    async def go():
+        async with McpToolClient(server_over(*files)) as client:
+            return await investigate(request(), client, Chooser())
+
+    inv = asyncio.run(go())
+    assert inv.result.status == "completed" and [n.accepted for n in inv.result.parameter_choices] == [False]
