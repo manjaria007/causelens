@@ -41,10 +41,10 @@
   - [x] 7.2 Smoke test: each tool returns under 2 s on the reference data
   - _Requirements: 9.1–9.3_
 
-- [ ] 8. Orchestrator and agents
-  - [ ] 8.1 `InvestigationState` and logged tool calls
-  - [ ] 8.2 Detective / Scientist / Experiment designer prompts using steering rules
-  - [ ] 8.3 Structured investigation result
+- [x] 8. Orchestrator and agents
+  - [x] 8.1 `InvestigationState` and logged tool calls
+  - [x] 8.2 Detective / Scientist / Experiment designer prompts using steering rules
+  - [x] 8.3 Structured investigation result
   - _Requirements: 8.1, 8.2, 8.4_
 
 - [ ] 9. Ground-truth evaluation

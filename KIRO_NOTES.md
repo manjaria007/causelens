@@ -581,3 +581,133 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   `Input should be a valid number [type=float_type, input_value=True, input_type=bool]`.
 - **Status.** The Kiro CLI workaround is verified. Kiro Web issue #12523 remains unresolved; this check says nothing about it.
 - The Mac-specific edit to `.kiro/settings/mcp.json` is deliberately not committed. Task 8 has not been started.
+
+## Task 8: orchestrator and agents (branch `task-8-orchestrator-agents`)
+
+- Built from `origin/main` at `bd7cbaa` (PR #8, merged; confirmed with `git merge-base --is-ancestor` after a fetch). New code is
+  `causelens/agents/` (`state.py`, `toolbox.py`, `roles.py`, `trace.py`, `claims.py`, `reasoner.py`, `report.py`, `result.py`,
+  `wording.py`, `orchestrator.py`), `docs/agents.md`, and three test files plus `tests/agents_support.py`. `causelens/analytics/`,
+  `causelens/mcp/`, the simulator, `data/` and steering are unchanged. `tasks.md` has 8.1-8.3 ticked. The Mac-specific
+  `.kiro/settings/mcp.json` edit stayed unstaged and uncommitted.
+- Read first: the three steering files, the design, requirements and tasks, `docs/mcp-server.md`, the MCP tool signatures and the
+  analytics result models. Task 9 (evaluation) and Task 10 (console) are not started.
+- What it does: the orchestrator calls the real MCP server through the official SDK client (`mcp.Client`) and logs every call
+  (`InvestigationState.log`: role, stage, tool, arguments as sent, the server's structured result). Prior results are logged as
+  `{"$prior": seq}`. Three roles are a prompt plus an allowed tool subset; the toolbox refuses any other tool before sending.
+  Prompts embed `scientist-rules.md` verbatim.
+- The design's LLM layer is kept as a `Reasoner` protocol. It returns sentence templates whose numbers are references into the
+  log; the orchestrator validates them (no digit in the text, every reference resolves, no cause-asserting words outside a causal
+  claim that cites a passed difference-in-differences result and quotes its assumptions) and drops and records what fails.
+  `TemplateReasoner` is the deterministic offline implementation. **No model-backed reasoner ships and none was run.**
+- Every number in the result is a `Traced` / `TracedInterval` read from the log by a `Tracer`; `verify_traces` re-reads all of
+  them (more than 150 on the reference run), and a test requires that the dumped result has no int or float outside a traced
+  object except log positions.
+- Decisions I made that the spec did not dictate (each is in `docs/agents.md`):
+  - The request carries the windows. `question` is recorded, not interpreted.
+  - Evidence strength is the tool's assessment for the weakest supported candidate; with none supported, or a stopped run, it is
+    `insufficient` with a fixed reason. A causal claim needs `supported`, a valid comparison, an interval excluding 0 and passing
+    pre-trend and placebo checks (borderline does not count).
+  - Estimates are made only for supported candidates, using the standalone `estimate_did`, `check_pre_trends`, `run_placebo` and
+    `project_impact`, cross-checked against the DiD embedded in the candidate test.
+  - With no single leading candidate, `design_experiment` is called with `arms="each_candidate"` instead of naming a target the
+    tests did not pick.
+  - Role tool subsets differ from the design table by `list_datasets`, `match_event_candidates` (Detective) and `test_candidates`
+    (Scientist). `power_analysis` is allowed to the designer and not called.
+- Reference result (seed 42, 12 calls): Checkout v4.2 `supported` (lag 0), Homepage hero refresh `rejected` as the sole immediate
+  explanation, localized to mobile x Safari, `excluded_dates` exactly `["2026-09-20"]`, DiD interval covering the true segment
+  effect, evidence `moderate` (base `strong`, capped by release ambiguity), experiment purpose `settle`. The same run over a real
+  stdio process gives byte-identical JSON.
+- Mistakes of mine caught by my own checks:
+  - The wording check first used `caus\w*`, which flagged "causal" in my own fixed phrases, and three of my phrases used
+    "because". The regex is now the verb forms and the phrases were reworded.
+  - Running a weak-effect scenario showed `design_experiment` returning `needs_input` ("name one with target_candidate") when no
+    candidate leads; that produced the `each_candidate` decision above.
+  - Test errors: a wrong count of traced values (2, not 3), a wrong count of calls reusing the quality report (8, not 9), a digit
+    check that counted placeholder names such as `{d0}`, a causal-claim test sentence with no assumption placeholder, and a
+    perturbation test whose tampered DiD was refused by the server's own provenance check. The last one is now a test of that
+    behavior: a candidate result altered in transit is recorded as `matches_candidate_test = False`, and the server then refuses to
+    build the experiment on it, so the run stops at `design_experiment`.
+- Mutation checks (13): role limit off, digits allowed, cause words allowed, claim without a DiD call, verification skipped,
+  pre-trend ignored, placebo ignored, interval-includes-zero ignored, strongest instead of weakest strength, estimates for
+  unsupported candidates, no stop on an unconfirmed change, exclusions not reused, cross-check off. Ten were caught at once.
+  Three were not (interval including zero, weakest vs strongest, the cross-check); each now has a test, and all 13 are caught.
+- Results: targeted agents tests 64 passed; the MCP block (server, CLI, datasets, review) 262 passed; then the full suite once after
+  the last code change, `.venv/bin/python -m pytest -q`: 1,096 passed (126 s, none skipped); `.venv/bin/python -m ruff check
+  causelens tests` passed. That is 64 new tests on top of the 1,032 in Task 7. Run on Python 3.14.5.
+- Not verified: a model-backed reasoner; the orchestrator over the HTTP transport (in-process and stdio were run); running the
+  orchestrator from inside Kiro. The weak-effect and no-event-log paths are tested on simulated data only. The candidate tests'
+  incorrect-attribution rates are unchanged (`docs/candidate-testing.md`); no new statistics were added.
+- Known limits: a causal claim is made for at most the candidates the tests support, and the reference run reports the claim with
+  `moderate` strength, not `strong`, because of the ambiguity cap. Display formats fix decimals (for example 3 for pp); the stored
+  values are exact. A 3-arm experiment on a weak effect can come back with a duration of years (the tool's own figure); the
+  design warnings are passed through as caveats.
+
+### Task 8 review round 1 (PR #9, review of `f62a8b4`)
+
+- Order of work: failing regressions first (`tests/test_agents_review.py`, 59 tests; 39 failed on `f62a8b4`, the rest were guards that
+  already held), the fixes, then the agents tests, then the full suite once after the last code change. Only `causelens/agents/`, its
+  tests and docs changed; analytics, the MCP adapters, simulator, data and steering are untouched.
+- Findings and what changed:
+  1. **A rejected event could receive a causal claim.** Confirmed: a claim citing Checkout's DiD but naming Hero's event passed. A
+     `causal_claim` is now bound to exactly one eligible `ClaimEligibility`: it must quote that claim's event, lag, onset, estimate,
+     interval, level, sample size and every assumption (each in its required format), name the design, quote nothing about another
+     candidate, and not type an event name. The spec for what it must quote is `claims.required_refs`.
+  2. **The LLM layer was unfinished.** Added `choose_parameters` to the `Reasoner` protocol (a short allow-list in `parameters.py`, strict
+     validation, refused whole, recorded), interpretation right after each role instead of after the whole run, and `ModelReasoner` over a
+     `TextModel` protocol (prompt = `Role.system_prompt()` with the rules verbatim plus a digest of the log and the allowed claims; strict
+     JSON parsing; same validation as any statement). **No provider adapter ships and no hosted model was run**; the tests use scripted
+     models, so real-model behavior is unknown. I chose not to ship an adapter I could not run.
+  3. **A combined statistic was credited to one segment.** The localization sentence now lists the whole selected set and says the figures
+     are for the set.
+  4. **Rejection wording overstated the conclusion.** Rejected candidates now carry the grounds the tool rejected on (exposure, declared
+     pattern, sole-source timing test) and a matching statement; `sole_source_rejected` is reported separately.
+  5. **Share confidence sets were missing.** Each tested candidate now carries its set (level, kind, pieces with open ends as `None`) or the
+     tool's reason when unavailable.
+  6. **Connection failures escaped.** `Toolbox` logs any ordinary exception from the client as a failed call. Reproducing it showed a second
+     problem: the SDK cancels the task that opened the session when its transport fails, which arrived as a `CancelledError` that looked like
+     the caller's own cancellation. `McpToolClient` now runs the session in its own task and fails calls with `SessionClosed`; a real
+     cancellation still propagates (tested).
+  7. **Malformed reasoner text crashed the run.** Parse and render errors are `TraceError`s and the statement is rejected and recorded.
+  8. **Logged payloads were mutable.** Arguments and results are copied on the way in and out and stored read-only. The `log` list itself is
+     still append-only by convention.
+  9. **Request parsing coerced.** `Window` uses the server's `IsoDate`; `lag_days` is `StrictInt`; strings are strict and declared patterns
+     use the server's strict-JSON validation.
+  10. **Late failures gave false history.** Notes and evidence are derived from how the stages ended. A failure at the design call keeps the
+     tests' evidence and the estimate and says the design failed; a failure during estimation says the estimate did not complete; no-event-log
+     datasets say so. The result has `stopped_stage`.
+- Decisions: the tunable parameters are only the bootstrap size, minimum days, the event lead window (two tools), the explaining-set threshold
+  and the pair option. I excluded alpha, level, power, MDE, seeds and anything the user declares. A refused parameter choice is not trimmed
+  to its valid part.
+- Mistakes of mine caught on the way: my first `McpToolClient.__aexit__` fix swallowed the wrong error and left a `CancelledError` (found by
+  the real closed-server test); a first mutation of the malformed-template check was equivalent to the original and showed "missed", so I
+  rewrote it; an assertion in a new test compared against arguments the pipeline legitimately sends.
+- Mutation checks: 18 on the new code (foreign refs, missing claim parts, typed event name, design name not required, payloads not frozen,
+  transport errors escaping, malformed template crash, render crash, pattern ground dropped, share set dropped, lax window, lax lag, estimate
+  note always "not run", unknown parameter allowed, interpretation only at the end, first segment only, late failure dropping evidence). All
+  caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,209 passed (186 s, none skipped), run once after the last code change; `.venv/bin/python -m
+  ruff check causelens tests` passed. That is 113 more tests than the 1,096 before this round. The orchestrator now also runs over
+  Streamable HTTP with byte-identical results to in-process and stdio. No statistical calibration was rerun; analytics are unchanged.
+- Not verified: any hosted model behind `ModelReasoner`; running the orchestrator inside Kiro.
+
+### Task 8 review round 2 (PR #9, re-review of `ffc060d`)
+
+- Two findings, both reproduced with failing regressions first (10 tests in `tests/test_agents_review.py`, all failing before the fix),
+  then fixed. Only `causelens/agents/reasoner.py` and `parameters.py` changed, plus tests and these notes.
+  1. **Localization wording.** The segment list was built from every reference whose name began with `s`, which also caught `share`
+     ("device=a, device=b, 100.06%"). It happened for one segment as well as several; my round-1 tests used a rendered check that did not
+     look at the exact list. Segment references now have their own names (`seg0`, ...) and the list is built from that set only; the
+     assumption list is likewise built from the claim's required references, not from a name prefix. Tests cover one, two and three segments.
+  2. **Non-finite parameter.** `explain_threshold=NaN` passed because every comparison with NaN is false, was recorded as accepted and made
+     the server reject the call (`stopped_tool_error`). `validate_choice` now refuses any non-finite number. NaN, infinity and negative
+     infinity from a reasoner fall back to the tool's default, are recorded as refused, and the run completes; a model reply containing
+     the JSON token `NaN` is covered too.
+- Mutation checks: reverting either fix fails the new regressions (7 and 3 tests).
+- Results: `.venv/bin/python -m pytest -q`: 1,219 passed (191 s), once after the last code change; `.venv/bin/python -m ruff check
+  causelens tests` passed. No calibration was rerun; analytics are unchanged.
+- Not verified: a live hosted model behind `ModelReasoner` (unchanged).
+
+- Follow-up to round 2 (suggested by the reviewer): the finite check now applies to floats only (`type(value) is float and not
+  math.isfinite(value)`). My version called `math.isfinite` on every number, and for an integer such as `10**400` it raises
+  `OverflowError`, which nothing caught, so a reasoner's oversized integer would have crashed the run. It is now refused by the range
+  check like any out-of-range integer. Two new regressions fail on the previous code and pass now. Full suite: 1,221 passed; Ruff clean.
