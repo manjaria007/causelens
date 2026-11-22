@@ -33,6 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.first_seed < 0:
+        print("causelens.eval: --first-seed must not be negative (the simulator's seeds are non-negative integers)", file=sys.stderr)
+        return 2
     if args.seeds < 1:
         print("causelens.eval: --seeds must be at least 1", file=sys.stderr)
         return 2

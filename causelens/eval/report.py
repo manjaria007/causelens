@@ -14,11 +14,12 @@ def render(report: EvalReport) -> str:
     for r in [*report.rates, report.all_criteria]:
         failed = ", ".join(str(s) for s in r.failed_seeds) or "none"
         lines.append(f"{r.name:<22}{f'{r.passes}/{r.n}':>8}{r.rate:>8.0%}   [{r.wilson_lower:>5.1%}, {r.wilson_upper:>5.1%}]       {failed}")
-    c = report.coverage_given_estimate
+    c = report.containment_given_estimate
     if c is not None:
         lines.append(
-            f"Interval coverage among runs that produced one: {c.passes}/{c.n} ({c.rate:.0%}, Wilson [{c.wilson_lower:.1%}, {c.wilson_upper:.1%}]); "
-            f"the criterion above counts a run with no interval as a failure"
+            f"Interval contains the true effect in {c.passes}/{c.n} of the runs that produced one ({c.rate:.0%}, Wilson "
+            f"[{c.wilson_lower:.1%}, {c.wilson_upper:.1%}]). Those runs are selected by the investigation supporting a candidate, so this is not a "
+            f"measure of the interval's 95% coverage; the criterion above counts a run with no interval as a failure"
         )
     lines += ["", "What each criterion requires:"]
     lines += [f"  {r.name}: {r.description}" for r in report.rates]

@@ -1,7 +1,7 @@
 """Grade one investigation against the answer key (Requirement 10.2).
 
-The answer key (``ground_truth.json``, or the same structure generated for another seed) is read only here, after the
-investigation has finished. The investigation runs against a server that was configured with the metrics and events files alone.
+The answer key (``ground_truth.json``, or the same structure generated for another seed) is used only here, for grading; the
+investigation never receives it. The investigation runs against a server that was configured with the metrics and events files alone.
 
 ``extract`` reads what the investigation reported (from the structured result, whose numbers are traced to its log) and ``grade``
 compares it with the key. A criterion passes only on positive evidence in the result: an investigation that stopped early, found no

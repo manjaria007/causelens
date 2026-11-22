@@ -1,8 +1,8 @@
 """Run full investigations on simulated seeds and grade them (Requirements 10.1 to 10.3).
 
 For each seed the simulator's metrics and events are written to a private temporary directory and served over MCP (in process,
-through the official client). The investigation sees nothing else. The answer key stays in this module and is used after the
-investigation returns. For the reference seed the key is ``data/ground_truth.json`` itself, and it is checked to be the key the
+through the official client). The investigation sees nothing else. The answer key is loaded before the run (and, for the
+reference seed, verified), is never given to the server or the orchestrator, and is used only for grading. For the reference seed the key is ``data/ground_truth.json`` itself, and it is checked to be the key the
 simulator produces for that seed, so a stale or edited file cannot be graded against silently.
 """
 from __future__ import annotations
@@ -79,8 +79,9 @@ class EvalReport(BaseModel):
     below_minimum: bool = Field(description=f"True when fewer than {MIN_SEEDS} seeds were run (Requirement 10.3 asks for at least {MIN_SEEDS}).")
     rates: list[CriterionRate]
     all_criteria: CriterionRate
-    coverage_given_estimate: CriterionRate | None = Field(
-        description="Among runs that produced an interval for the planted event: how often it covers the true effect."
+    containment_given_estimate: CriterionRate | None = Field(
+        description="Among the runs that produced an interval for the planted event (a subset the investigation itself selected, by supporting "
+        "a candidate): how often the interval contains the true segment effect. Not an estimate of the interval's coverage."
     )
     wrong_event_supported_seeds: list[int]
     status_counts: dict[str, int]
@@ -160,8 +161,8 @@ def summarize(outcomes: list[SeedOutcome]) -> EvalReport:
         )
 
     with_estimate = [o for o in outcomes if o.has_estimate]
-    coverage = (
-        rate("coverage_given_estimate", "among runs with an interval for the planted event, how often it covers the true effect",
+    containment = (
+        rate("containment_given_estimate", "among runs with an interval for the planted event (a selected subset), how often it contains the true effect",
              [next(c.passed for c in o.criteria if c.name == "ci_covers_truth") for o in with_estimate], with_estimate)
         if with_estimate else None
     )
@@ -178,13 +179,15 @@ def summarize(outcomes: list[SeedOutcome]) -> EvalReport:
     return EvalReport(
         seeds=[o.seed for o in outcomes], reference_seed=REFERENCE_SEED if reference else None,
         reference_passed=reference.passed if reference else None, below_minimum=n < MIN_SEEDS, rates=rates,
-        all_criteria=rate("all_criteria", "passes every criterion", [o.passed for o in outcomes]), coverage_given_estimate=coverage,
+        all_criteria=rate("all_criteria", "passes every criterion", [o.passed for o in outcomes]), containment_given_estimate=containment,
         wrong_event_supported_seeds=[o.seed for o in outcomes if o.wrong_event_supported],
         status_counts=dict(sorted(statuses.items())), strength_counts=dict(sorted(strengths.items())), outcomes=outcomes,
     )
 
 
 def evaluate(seeds: list[int], reference_file: Path = REFERENCE_TRUTH) -> EvalReport:
+    if any(seed < 0 for seed in seeds):
+        raise EvalError("seeds must not be negative")
     if len(set(seeds)) != len(seeds):
         raise EvalError("seeds must be distinct")
     return summarize([run_seed(seed, reference_file) for seed in seeds])

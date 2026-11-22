@@ -237,7 +237,7 @@ def test_summary_counts_each_criterion_and_lists_the_failing_seeds():
     assert (rates["identifies_cause"].passes, rates["identifies_cause"].failed_seeds) == (3, [43])
     assert (rates["ci_covers_truth"].passes, rates["ci_covers_truth"].failed_seeds) == (2, [43, 44])
     assert (r.all_criteria.passes, r.all_criteria.n, r.all_criteria.failed_seeds) == (2, 4, [43, 44])
-    assert r.coverage_given_estimate.n == 3 and r.coverage_given_estimate.passes == 2  # seed 43 had no interval and is not counted here
+    assert r.containment_given_estimate.n == 3 and r.containment_given_estimate.passes == 2  # seed 43 had no interval and is not counted here
     assert r.wrong_event_supported_seeds == [45] and r.strength_counts == {"insufficient": 1, "moderate": 3}
     assert r.reference_seed == 42 and r.reference_passed is True and r.below_minimum
     for x in r.rates:
@@ -246,7 +246,7 @@ def test_summary_counts_each_criterion_and_lists_the_failing_seeds():
 
 def test_summary_without_the_reference_seed_or_any_estimate():
     r = summarize([outcome(50, {"ci_covers_truth": False}, estimate=False)])
-    assert r.reference_seed is None and r.reference_passed is None and r.coverage_given_estimate is None
+    assert r.reference_seed is None and r.reference_passed is None and r.containment_given_estimate is None
 
 
 def test_the_minimum_number_of_seeds_is_flagged_not_assumed():
@@ -271,6 +271,24 @@ def test_the_default_run_is_twenty_consecutive_seeds_from_the_reference():
 def test_fewer_than_twenty_seeds_needs_an_explicit_flag(capsys):
     assert cli.main(["--seeds", "5"]) == 2 and "at least 20" in capsys.readouterr().err
     assert cli.main(["--seeds", "0", "--allow-fewer-seeds"]) == 2
+
+
+@pytest.mark.parametrize("first", ["-1", "-42"])
+def test_a_negative_first_seed_is_a_usage_error_not_a_crash(first, capsys):
+    assert cli.main(["--first-seed", first, "--seeds", "1", "--allow-fewer-seeds"]) == 2
+    err = capsys.readouterr().err
+    assert "--first-seed must not be negative" in err and "Traceback" not in err
+
+
+def test_seed_zero_is_accepted(tmp_path):
+    out = tmp_path / "zero.json"
+    assert cli.main(["--first-seed", "0", "--seeds", "1", "--allow-fewer-seeds", "--json", str(out)]) == 0  # no reference seed: no verdict
+    assert EvalReport.model_validate_json(out.read_text()).seeds == [0]
+
+
+def test_the_library_entry_point_refuses_negative_seeds_too():
+    with pytest.raises(EvalError, match="must not be negative"):
+        eval_runner.evaluate([-1])
 
 
 def test_a_small_run_prints_the_table_and_writes_json(tmp_path, capsys):
@@ -308,3 +326,17 @@ def test_the_exit_status_follows_the_reference_seed_only(monkeypatch, capsys):
 def test_the_report_text_is_free_of_cause_claims_and_unlabelled_numbers():
     text = cli.render(summarize([outcome(42, {}), outcome(43, {"ci_covers_truth": False})]))
     assert not re.search(r"\b(caused|because of|due to)\b", text)
+
+
+def test_the_report_does_not_present_containment_among_selected_runs_as_coverage():
+    text = cli.render(summarize([outcome(42, {}), outcome(43, {"ci_covers_truth": False})]))
+    assert "contains the true effect in 1/2 of the runs that produced one" in text
+    assert "selected by the investigation" in text and "not a measure of the interval's 95% coverage" in text
+    assert "Interval coverage" not in text
+
+
+def test_the_docs_and_modules_say_the_key_is_used_only_for_grading():
+    for path in (ROOT / "causelens" / "eval" / "runner.py", ROOT / "causelens" / "eval" / "grading.py", ROOT / "docs" / "evaluation.md"):
+        text = " ".join(path.read_text().split())
+        assert "used only" in text and "for grading" in text, path
+        assert "read only after" not in text and "used after the investigation" not in text and "read only here" not in text, path

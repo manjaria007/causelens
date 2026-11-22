@@ -19,8 +19,8 @@ report how often each criterion passes, and no threshold was specified.
 
 For each seed the simulator's metrics and events are written to a private temporary directory and served by the Task 7 MCP server
 (in process, through the official client). The Task 8 orchestrator investigates with the same windows every time (before the planted
-release, and from it to the end of the data) and the default template reasoner. The answer key is not written there and is read only
-after the investigation returns. A test checks the directory holds only `metrics_daily.csv` and `events.csv`; the server also refuses to
+release, and from it to the end of the data) and the default template reasoner. The answer key is not written there. It is loaded before the run (seed 42's is also
+verified then), never passed to the server or the orchestrator, and used only for grading. A test checks the directory holds only `metrics_daily.csv` and `events.csv`; the server also refuses to
 serve any file named like the key.
 
 For seed 42 the key is `data/ground_truth.json` itself, checked to equal what the simulator produces for that seed (a stale or edited
@@ -39,7 +39,7 @@ no estimate, or never localized fails what it did not establish.
 | `ci_covers_truth` | the 95% difference-in-differences interval for Checkout v4.2 contains the seed's true segment effect (`true_effect_in_segment_pp`) |
 
 The overall result passes only if all five pass. Also reported: how often a wrong event was supported (an incorrect attribution),
-the status and evidence-strength counts, and the interval coverage among the runs that produced an interval at all (the criterion
+the status and evidence-strength counts, and how often the interval contains the true effect among the runs that produced one (the criterion
 counts a run with no interval as a miss; this separates "no estimate" from "an estimate that missed"). Rates carry 95% Wilson
 intervals.
 
@@ -61,8 +61,12 @@ Run once on the committed code; the command is deterministic, so it reproduces.
 * A wrong event was supported in 0 of 20 runs.
 * Evidence strength: `moderate` in 16 runs and `insufficient` in 4. No run reached `strong`: release attribution is ambiguous on this
   data (Hero at lag 1 shares Checkout's onset), which caps strength at `moderate` by design.
-* Interval coverage among the 16 runs that produced an interval: 14/16 (88%, Wilson [64.0%, 96.5%]), against a nominal 95%. With 16
-  runs this does not distinguish 88% from 95%, but it is not evidence of the nominal level either.
+* Containment among the 16 runs that produced an interval: 14 of them contain the true effect (88%, Wilson [64.0%, 96.5%]). This is
+  a count over selected runs, not a measurement of the interval's 95% coverage. The 16 are the runs in which the investigation
+  supported a candidate, a selection made by the investigation itself; the four that supported none have no interval and are
+  excluded. The 16 intervals are also not all for the same population: seed 59's is for a broader focal group (`browser=safari`) than
+  the planted segment. How often the method's intervals cover their target is a property tested on null data in
+  `docs/candidate-testing.md`, not by this evaluation.
 
 ### The seeds that did not pass
 
