@@ -689,3 +689,20 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   ruff check causelens tests` passed. That is 113 more tests than the 1,096 before this round. The orchestrator now also runs over
   Streamable HTTP with byte-identical results to in-process and stdio. No statistical calibration was rerun; analytics are unchanged.
 - Not verified: any hosted model behind `ModelReasoner`; running the orchestrator inside Kiro.
+
+### Task 8 review round 2 (PR #9, re-review of `ffc060d`)
+
+- Two findings, both reproduced with failing regressions first (10 tests in `tests/test_agents_review.py`, all failing before the fix),
+  then fixed. Only `causelens/agents/reasoner.py` and `parameters.py` changed, plus tests and these notes.
+  1. **Localization wording.** The segment list was built from every reference whose name began with `s`, which also caught `share`
+     ("device=a, device=b, 100.06%"). It happened for one segment as well as several; my round-1 tests used a rendered check that did not
+     look at the exact list. Segment references now have their own names (`seg0`, ...) and the list is built from that set only; the
+     assumption list is likewise built from the claim's required references, not from a name prefix. Tests cover one, two and three segments.
+  2. **Non-finite parameter.** `explain_threshold=NaN` passed because every comparison with NaN is false, was recorded as accepted and made
+     the server reject the call (`stopped_tool_error`). `validate_choice` now refuses any non-finite number. NaN, infinity and negative
+     infinity from a reasoner fall back to the tool's default, are recorded as refused, and the run completes; a model reply containing
+     the JSON token `NaN` is covered too.
+- Mutation checks: reverting either fix fails the new regressions (7 and 3 tests).
+- Results: `.venv/bin/python -m pytest -q`: 1,219 passed (191 s), once after the last code change; `.venv/bin/python -m ruff check
+  causelens tests` passed. No calibration was rerun; analytics are unchanged.
+- Not verified: a live hosted model behind `ModelReasoner` (unchanged).

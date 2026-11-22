@@ -408,3 +408,83 @@ def test_finding10_a_failure_during_estimation_does_not_report_a_complete_estima
     assert r.causal_estimate_note and "did not complete" in r.causal_estimate_note
     assert r.evidence.strength == "insufficient"
 
+
+
+# --------------------------------------------------------------------------- PR #9 re-review of ffc060d
+
+def localization_sentence(segments: list[str]) -> str:
+    from causelens.agents.trace import render
+
+    state = two_segment_state()
+    result = dict(state.log[0].result)
+    result["localization"] = {**result["localization"], "segments": segments}
+    state.log[0] = state.log[0].model_copy(update={"result": result})
+    sentence = next(s for s in TemplateReasoner().interpret(DETECTIVE, Context(state, ())) if "concentrated" in s.text)
+    return render(sentence, state)
+
+
+def test_rereview1_the_segment_list_holds_segments_only_for_two_segments():
+    text = localization_sentence(["device=a", "device=b"])
+    assert "concentrated in the set of segments device=a, device=b, which together account for 100.06% " in text
+    assert text.count("100.06%") == 1 and text.count("20.00%") == 1
+
+
+def test_rereview1_the_segment_list_holds_segments_only_for_one_segment():
+    text = localization_sentence(["device=a"])
+    assert "concentrated in device=a, which accounts for 100.06% of the overall change while carrying 20.00% " in text
+    assert "together" not in text
+
+
+def test_rereview1_three_segments_are_all_listed_and_nothing_else():
+    text = localization_sentence(["device=a", "device=b", "device=c"])
+    assert "device=a, device=b, device=c, which together" in text
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_rereview2_non_finite_parameters_are_refused(bad):
+    from causelens.agents import ParameterChoice, ParameterError
+    from causelens.agents.parameters import validate_choice
+
+    with pytest.raises(ParameterError, match="finite"):
+        validate_choice("decompose_change", ParameterChoice(arguments={"explain_threshold": bad}, rationale="Tighter."))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_rereview2_a_non_finite_choice_falls_back_to_defaults_and_the_run_completes(files, bad):
+    from causelens.agents import ParameterChoice
+
+    class Chooser(TemplateReasoner):
+        def choose_parameters(self, role, tool, context):
+            return ParameterChoice(arguments={"explain_threshold": bad}, rationale="Tighter.") if tool == "decompose_change" else None
+
+    async def go():
+        async with McpToolClient(server_over(*files)) as client:
+            return await investigate(request(), client, Chooser())
+
+    inv = asyncio.run(go())
+    assert inv.result.status == "completed"
+    assert "explain_threshold" not in inv.state.last("decompose_change").arguments
+    (note,) = inv.result.parameter_choices
+    assert not note.accepted and note.call is None and "finite" in note.problem
+
+
+def test_rereview2_a_model_that_replies_with_nan_is_refused_too(files):
+    import json
+
+    from causelens.agents import ModelReasoner
+
+    class Model:
+        def complete(self, system, user):
+            payload = json.loads(user[: user.rindex("\n\n")])
+            if payload["task"] == "choose_parameters" and payload["tool"] == "decompose_change":
+                return '{"arguments": {"explain_threshold": NaN}, "rationale": "Tighter."}'
+            if payload["task"] == "choose_parameters":
+                return '{"arguments": {}, "rationale": "default"}'
+            return '{"statements": []}'
+
+    async def go():
+        async with McpToolClient(server_over(*files)) as client:
+            return await investigate(request(), client, ModelReasoner(Model()))
+
+    inv = asyncio.run(go())
+    assert inv.result.status == "completed" and [n.accepted for n in inv.result.parameter_choices] == [False]

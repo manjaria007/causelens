@@ -100,10 +100,13 @@ class TemplateReasoner:
         decomposition = state.last("decompose_change")
         if decomposition and decomposition.result and decomposition.result.get("localization"):
             segments = decomposition.result["localization"]["segments"]
-            refs = {f"s{i}": _ref(decomposition, f"/localization/segments/{i}") for i in range(len(segments))}
-            refs["share"] = _ref(decomposition, "/localization/selected_share_of_change", "pct")
-            refs["traffic"] = _ref(decomposition, "/localization/traffic_share_post", "pct")
-            listed = ", ".join("{" + k + "}" for k in refs if k.startswith("s"))
+            segment_refs = {f"seg{i}": _ref(decomposition, f"/localization/segments/{i}") for i in range(len(segments))}
+            refs = {
+                **segment_refs,
+                "share": _ref(decomposition, "/localization/selected_share_of_change", "pct"),
+                "traffic": _ref(decomposition, "/localization/traffic_share_post", "pct"),
+            }
+            listed = ", ".join("{" + k + "}" for k in segment_refs)
             if len(segments) == 1:
                 text = (f"The change is concentrated in {listed}, which accounts for {{share}} of the overall change while carrying "
                         "{traffic} of post-window sessions. This says where the change is, not why.")
@@ -129,9 +132,10 @@ class TemplateReasoner:
         for claim in context.claims:
             event = Ref(call=claim.verdict_call, path=claim.verdict_path.rsplit("/", 1)[0] + "/event", fmt="text")
             if claim.allowed:
-                refs = {name: Ref(call=c, path=p, fmt=f) for name, (c, p, f) in required_refs(state, claim).items()}  # type: ignore[arg-type]
+                required = required_refs(state, claim)
+                refs = {name: Ref(call=c, path=p, fmt=f) for name, (c, p, f) in required.items()}  # type: ignore[arg-type]
                 refs["focal"] = _ref(testing, "/focal/label")
-                listed = " ".join("{" + k + "}" for k in refs if k.startswith("a"))
+                listed = " ".join("{" + k + "}" for k, (_, path, _) in required.items() if path.startswith("/assumptions/"))
                 out.append(Statement(
                     role=role.name, kind="causal_claim", refs=refs,
                     text="By difference-in-differences, the change in conversion of {focal} relative to its comparison that is attributed "
