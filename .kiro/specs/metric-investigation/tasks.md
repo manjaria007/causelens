@@ -47,8 +47,8 @@
   - [x] 8.3 Structured investigation result
   - _Requirements: 8.1, 8.2, 8.4_
 
-- [ ] 9. Ground-truth evaluation
-  - [ ] 9.1 `python -m causelens.eval --seeds 20` grades against ground_truth.json
+- [x] 9. Ground-truth evaluation
+  - [x] 9.1 `python -m causelens.eval --seeds 20` grades against ground_truth.json
   - _Requirements: 10.1–10.3_
 
 - [ ] 10. Investigation console
