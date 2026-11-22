@@ -763,3 +763,42 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   interval's coverage, and the docs point to the Task 5 null calibration for the coverage property. A test pins the wording.
 - Results: `.venv/bin/python -m pytest -q`: 1,271 passed (199 s), once after the last code change; `.venv/bin/python -m ruff check
   causelens tests` passed. The 20-seed result is unchanged (14/20 all criteria; 16/20, 19/20, 18/20, 20/20, 14/20 by criterion).
+
+## Task 10: investigation console (branch `task-10-investigation-console`)
+
+- Built from `origin/main` at `963c7ef` (PR #10, Task 9, merged; checked with `git merge-base --is-ancestor` after a fetch). Your Mac
+  `.kiro/settings/mcp.json` edit stayed unstaged and uncommitted. Read first: `tasks.md` (Task 10, 10.1, 10.2), requirement 8.3 (and 8.2,
+  8.4 for what the console shows), the design, all three steering files, and the Task 8 result model and tracing code.
+- What it is: `causelens/ui/` and `python -m causelens.ui --out console.html`. It runs the Task 8 orchestrator through an in-process MCP
+  server (or `--server URL`) with the template reasoner and writes one self-contained HTML page (no script, no network, inline SVG): six
+  steps (detect, locate, localize, test, estimate, recommend), each with its evidence, and a table of the logged calls. Panels: level
+  before and after with the change point, segment waterfall, difference-in-differences chart, placebo chart, plus the candidate cards with
+  alternatives, lag sensitivity and share confidence sets.
+- **Numbers.** The view is built from the structured result and, for the panels, from logged MCP results through a `Tracer`; `build_view`
+  re-reads every traced value from the log before rendering. The renderer only formats traced values. No chart-axis tick labels are
+  printed (they would be numbers nobody returned). Every number links to its call number in a provenance table, with the exact value in
+  a tooltip. Added `TracedBand` (an interval without a sample size, for placebo dates) and `Tracer.band` to `agents/trace.py`; nothing
+  else outside `causelens/ui/` changed.
+- **Preserved on the page, in every run:** evidence strength with reasons (top), a data-quality warning when days were excluded or flags
+  raised, intervals with level and sample sizes next to every estimate, p-values only next to their effect, the alternatives and why each
+  was kept or set aside, rejection grounds worded as rejections of a named hypothesis, assumptions beside the estimate, a causal claim only
+  where `assess_claim` allows it and labelled as a separate attribution, and the stop reason and not-run steps when an investigation stops.
+- **Deviation from the design, stated plainly:** the spec asks for a *series* with the change point. No MCP tool returns daily values and you
+  asked for existing results only, so the panel shows the conversion level in each window (with its interval) against the change point,
+  the plausible range, the candidate events and the excluded days, and says so on the page. A real daily series needs a new tool, which
+  is a Task 7 change; I did not make it.
+- Decisions: six console steps map onto the seven stages (detect = validate + confirm); the waterfall is the localized partition's top 12
+  segments by rank; display precision is fixed (three decimals for pp) with exact values in tooltips; the page is static.
+- Mistakes of mine caught by my checks: my own fixed phrases used "because" (the wording test caught it, twice); the dataset facts
+  (call 1) were not shown anywhere, so there was no link target for call 1 (found by the link test, now a "Data" line with fingerprints);
+  a "yes" bullet for the sole-source rejection ground had lost its label; a first numeric-token check let call numbers stand in for data
+  numbers, so call numbers are now allowed only inside the source superscripts; the guardrail list showed names and details as one flat
+  list. Reviewed by screenshot in headless Chrome (reference run, steps 1-6).
+- Mutation checks (17: waterfall limit and order, wrong field for contribution, source links, interval bounds, strength block hidden, alternatives
+  dropped, data-quality banner, escaping, a derived count, assumptions, stop banner, CSP, claim label, not-run steps shown as done, statement
+  placement, placebo). First pass missed 4 (the 12-row limit, a hidden strength block, alternatives that also appear in the written summary,
+  the stop banner) and one derived-count mutation that collided with a real number; each now has a test, and all are caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,307 passed (207 s), once after the last code change; `.venv/bin/python -m ruff check causelens
+  tests` passed. 36 new tests in `tests/test_ui.py`. No analytics changed, so no calibration was rerun.
+- **Not verified:** a live hosted model (the console uses the template reasoner; `ModelReasoner` has only been run with scripted models);
+  other browsers, print layout, or a screen reader; a daily series panel (see above).

@@ -95,6 +95,12 @@ class TracedInterval(BaseModel):
     n: list[Traced] = Field(min_length=1, description="The sample sizes the estimate rests on (days, sessions, observations).")
 
 
+class TracedBand(TracedInterval):
+    """An interval whose sample size the tool does not report (for example each placebo date). ``n`` may be empty."""
+
+    n: list[Traced] = Field(default_factory=list)
+
+
 class Tracer:
     """Builds ``Traced`` values by reading the log. The only way the report obtains a number."""
 
@@ -118,6 +124,13 @@ class Tracer:
         if not isinstance(found, dict) or not {"estimate", "lower", "upper", "level"} <= found.keys():
             raise TraceError(f"call {call} {path!r} is not an interval")
         return TracedInterval(label=label, call=call, path=path, unit=unit, n=n, **{k: float(found[k]) for k in ("estimate", "lower", "upper", "level")})
+
+    def band(self, call: int, path: str, label: str, unit: Unit) -> TracedBand:
+        """Like ``interval`` for an estimate the tool reports without a sample size. Say so wherever it is shown."""
+        found = _resolve(self.state, call, path)
+        if not isinstance(found, dict) or not {"estimate", "lower", "upper", "level"} <= found.keys():
+            raise TraceError(f"call {call} {path!r} is not an interval")
+        return TracedBand(label=label, call=call, path=path, unit=unit, **{k: float(found[k]) for k in ("estimate", "lower", "upper", "level")})
 
     def maybe_interval(self, call: int, path: str, label: str, unit: Unit, n: list[Traced]) -> TracedInterval | None:
         return None if _resolve(self.state, call, path) is None else self.interval(call, path, label, unit, n)

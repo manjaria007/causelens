@@ -51,7 +51,7 @@
   - [x] 9.1 `python -m causelens.eval --seeds 20` grades against ground_truth.json
   - _Requirements: 10.1–10.3_
 
-- [ ] 10. Investigation console
-  - [ ] 10.1 Step view: detect → locate → localize → test → estimate → recommend
-  - [ ] 10.2 Evidence panels (series with change point, segment waterfall, DiD chart, placebo)
+- [x] 10. Investigation console
+  - [x] 10.1 Step view: detect → locate → localize → test → estimate → recommend
+  - [x] 10.2 Evidence panels (series with change point, segment waterfall, DiD chart, placebo)
   - _Requirements: 8.3_
