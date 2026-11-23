@@ -1,16 +1,16 @@
 {
   "mcpServers": {
     "causelens": {
-      "command": "/projects/sandbox/causelens/.venv/bin/python",
+      "command": ".venv/bin/python",
       "args": [
         "-m", "causelens.mcp",
         "--transport", "stdio",
         "--dataset", "reference",
-        "/projects/sandbox/causelens/data/metrics_daily.csv",
-        "/projects/sandbox/causelens/data/events.csv"
+        "data/metrics_daily.csv",
+        "data/events.csv"
       ],
       "env": {
-        "PYTHONPATH": "/projects/sandbox/causelens"
+        "PYTHONPATH": "."
       },
       "disabled": false,
       "autoApprove": [

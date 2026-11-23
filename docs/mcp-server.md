@@ -50,9 +50,10 @@ authenticating proxy in front.
 ## Configure Kiro
 
 Kiro reads `.kiro/settings/mcp.json` (workspace) or `~/.kiro/settings/mcp.json` (user), per
-[Kiro's MCP configuration](https://kiro.dev/docs/mcp/configuration/). Ready-made files are in `docs/mcp/`; copy one into
-`.kiro/settings/mcp.json`. Every tool is read-only, so listing them in `autoApprove` is reasonable; remove names to be
-prompted instead, or add rarely used ones to `disabledTools`.
+[Kiro's MCP configuration](https://kiro.dev/docs/mcp/configuration/). The tracked workspace config starts the local
+stdio launcher without `autoApprove`. Ready-made examples are in `docs/mcp/`; their existing `autoApprove` lists
+are optional permission settings, so copying an example also copies those settings. The stdio example launches
+`.venv/bin/python` directly after the setup and dataset-generation steps are complete.
 
 Remote (start the HTTP server first): `docs/mcp/kiro-http.json`
 
@@ -60,21 +61,26 @@ Remote (start the HTTP server first): `docs/mcp/kiro-http.json`
 { "mcpServers": { "causelens": { "url": "http://127.0.0.1:8000/mcp", "disabled": false } } }
 ```
 
-Local process over stdio (for Kiro Web, where the workspace root is `/projects/sandbox` and the repository is
-`/projects/sandbox/causelens`): `docs/mcp/kiro-stdio.json`
+Local process over stdio (macOS/Linux), launched from the repository root:
 
 ```json
 { "mcpServers": { "causelens": {
-    "command": "/projects/sandbox/causelens/.venv/bin/python",
-    "args": ["-m", "causelens.mcp", "--transport", "stdio", "--dataset", "reference",
-             "/projects/sandbox/causelens/data/metrics_daily.csv", "/projects/sandbox/causelens/data/events.csv"],
-    "env": { "PYTHONPATH": "/projects/sandbox/causelens" } } } }
+    "command": "/bin/bash",
+    "args": ["scripts/mcp_stdio.sh"],
+    "disabled": false } } }
 ```
 
-Use absolute paths: the package is not pip-installed, so `PYTHONPATH` points at the repository, and the process's
-working directory is not specified by Kiro's configuration. These files follow Kiro's documented format and are checked
-by tests for valid JSON and real command-line flags. Native Kiro CLI calls have been verified as recorded below;
-Kiro Web attachment remains unresolved, so confirm connection status in the client you use.
+Start Kiro CLI with the clone root as its working directory (`cd` into the directory containing `README.md`,
+`scripts/` and `.kiro/`, then run `kiro-cli chat`). The relative script argument is resolved from that working
+directory; it is not relative to `.kiro/settings/`. The launcher then derives its own absolute repository root, sets
+`PYTHONPATH`, and uses that clone's `.venv` and data files. A clone path containing spaces needs no JSON edits.
+
+The official [MCP configuration reference](https://kiro.dev/docs/mcp/configuration/) documents `command`, `args`
+and `env`, and the [CLI command reference](https://kiro.dev/docs/reference/cli-commands/) shows workspace-scoped
+relative launch commands. Neither promises that every Kiro client starts a server in the clone root, so this config
+has an explicit working-directory requirement. It does not invent a `cwd` setting or a `${workspaceFolder}` token.
+If a client launches local servers elsewhere, use the HTTP example with a separately started server, or set an
+absolute launcher path in that client's local configuration. Keep machine-specific paths out of the tracked config.
 
 ### Repository-scoped config and launcher
 
@@ -82,7 +88,8 @@ Kiro Web attachment remains unresolved, so confirm connection status in the clie
 works from a fresh checkout: if `.venv` is missing or lacks a runtime dependency it creates it and installs
 `requirements.txt` minus pytest, hypothesis and ruff; if `data/metrics_daily.csv` is missing it generates it (seed 42)
 in a temporary directory and copies only that file, so the committed `events.csv` and `ground_truth.json` are never
-rewritten. All setup output goes to stderr; stdout carries only protocol messages. The first start takes about 40 s,
+rewritten. All setup output goes to stderr; stdout carries only protocol messages. The launcher sets `PYTHONPATH`
+from its own location, so the config needs no explicit package path. The first start takes about 40 s,
 later starts about 4 s, so a client with a short connect timeout may need a second attempt.
 
 ### Verify an actual Kiro tool call
@@ -99,10 +106,9 @@ Web Agent Config path; the CLI workaround does not establish that Web attachment
 
 For a Kiro Web connection check, use the procedure below and record actual responses or the connection error:
 
-1. Copy `docs/mcp/kiro-stdio.json` (or `kiro-http.json` with the server running) to `.kiro/settings/mcp.json` in the
-   workspace (the Kiro Web workspace root is `/projects/sandbox`). Leave `autoApprove` out for the first run if you want to
-   see each call. (In the Kiro Web sandbox that built this server, `/projects/sandbox/.kiro/settings/` was read-only to the
-   agent, so the file could not be written from a session and has to be added from Kiro's MCP settings or by hand.)
+1. Use the tracked `.kiro/settings/mcp.json` from the clone root, or copy `docs/mcp/kiro-stdio.json` if you want its
+   explicit approval list. For HTTP, start the server and use `docs/mcp/kiro-http.json`. These are workspace settings;
+   they do not require replacing your user-level config.
 2. Start a **new** Kiro session so the server loads, and confirm `causelens` is listed with 15 tools in the MCP panel (14 before Task 10 added `daily_series`).
 3. Ask Kiro to call `list_datasets`, then `power_analysis` with `baseline: 0.05, mde_pp: 1.0`, then
    `check_data_quality` on `reference`. Expect: dataset `reference` with 5,888 rows; 8,158 sessions per arm; excluded date

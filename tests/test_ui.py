@@ -397,8 +397,71 @@ def test_the_causal_claim_is_labelled_and_the_attribution_is_separate(reference_
     assert claim in visible
 
 
+def test_the_headline_names_only_the_supported_event_and_its_focal_segment(reference_view):
+    text = " ".join(" ".join(parse(render_module.headline_html(reference_view)).text).split())
+    assert "Likely cause: Checkout v4.2 · mobile Safari" in text
+    assert "Difference-in-differences, conditional on evaluated lag 0" in text and "evidence strength: moderate" in text
+    candidate = next(c for c in reference_view.result.candidates if c.verdict.value == "supported")
+    assert candidate.attribution_note.value in text
+    assert "Assumptions behind this attribution" in text
+
+
+def test_the_headline_does_not_name_a_cause_when_identification_checks_did_not_pass(reference_view):
+    estimate = reference_view.result.causal_estimates[0]
+    unchecked = estimate.model_copy(update={"claim": estimate.claim.model_copy(update={"allowed": False})})
+    result = reference_view.result.model_copy(update={"causal_estimates": [unchecked]})
+    text = " ".join(parse(render_module.headline_html(reference_view.model_copy(update={"result": result}))).text)
+    assert "Attribution not established" in text and "Likely cause:" not in text and CHECKOUT not in text
+
+
+def test_the_headline_is_neutral_when_the_investigation_did_not_complete(reference_view):
+    result = reference_view.result.model_copy(update={"status": "stopped_tool_error"})
+    text = " ".join(parse(render_module.headline_html(reference_view.model_copy(update={"result": result}))).text)
+    assert "Investigation incomplete" in text and "Likely cause:" not in text
+
+
+@pytest.mark.parametrize("case", ["no_estimate", "multiple_supported", "insufficient_strength"])
+def test_the_headline_does_not_turn_incomplete_attribution_evidence_into_a_cause(reference_view, case):
+    r = reference_view.result
+    if case == "no_estimate":
+        r = r.model_copy(update={"causal_estimates": []})
+    elif case == "multiple_supported":
+        candidates = [c.model_copy(update={"verdict": c.verdict.model_copy(update={"value": "supported"})}) for c in r.candidates]
+        r = r.model_copy(update={"candidates": candidates})
+    else:
+        r = r.model_copy(update={"evidence": r.evidence.model_copy(update={"strength": "insufficient"})})
+    text = " ".join(parse(render_module.headline_html(reference_view.model_copy(update={"result": r}))).text)
+    assert "Likely cause:" not in text
+
+
+def test_the_headline_reads_the_event_name_instead_of_hardcoding_the_reference_answer(reference_view):
+    r = reference_view.result
+    candidate = next(c for c in r.candidates if c.verdict.value == "supported")
+    event = candidate.event.model_copy(update={"value": "Another checkout release"})
+    candidate = candidate.model_copy(update={"event": event})
+    estimate = r.causal_estimates[0]
+    estimate = estimate.model_copy(update={"event": event, "claim": estimate.claim.model_copy(update={"event": event.value})})
+    result = r.model_copy(update={"candidates": [candidate], "causal_estimates": [estimate]})
+    headline = render_module.headline_html(reference_view.model_copy(update={"result": result}))
+    text = " ".join(parse(headline.split("</p>", 1)[0]).text)  # the attribution notes deliberately retain the original fixture's event names
+    assert "Another checkout release" in text and CHECKOUT not in text
+
+
+def test_the_headline_falls_back_to_the_localized_label_and_keeps_broader_segments_broad(reference_view):
+    r = reference_view.result
+    estimate = r.causal_estimates[0]
+    empty = estimate.model_copy(update={"focal": estimate.focal.model_copy(update={"value": ""})})
+    browser = r.localization.segments[0].model_copy(update={"value": "browser=safari"})
+    result = r.model_copy(update={"causal_estimates": [empty], "localization": r.localization.model_copy(update={"segments": [browser]})})
+    text = " ".join(" ".join(parse(render_module.headline_html(reference_view.model_copy(update={"result": result}))).text).split())
+    assert "Likely cause: Checkout v4.2 · Safari" in text and "mobile Safari" not in text
+    unusual = browser.model_copy(update={"value": "browser=safari, secure"})
+    assert "browser=safari, secure" in " ".join(parse(render_module._headline_segment(unusual)).text)
+
+
 def test_static_wording_follows_the_scientist_rules(reference_page, reference_view, reference_run):
-    visible = " ".join(parse(reference_page).text)
+    # The separately tested headline may use causal wording only when the same identification checks allow its attribution.
+    visible = " ".join(parse(reference_page.replace(render_module.headline_html(reference_view), "", 1)).text)
     # strip everything a tool or a validated reasoner wrote, then check what the console itself says
     sources = [str(t.value) for t in iter_traced(reference_view) if isinstance(t, Traced) and isinstance(t.value, str)]
     sources += [s.text for s in reference_run.result.statements]
@@ -455,6 +518,7 @@ def test_with_no_supported_candidate_the_page_says_so_and_still_recommends_an_ex
     view = build_view(inv)
     visible = " ".join(parse(render_html(view)).text)
     assert "Evidence strength: insufficient" in visible and "No causal estimate." in visible and r.causal_estimate_note in visible
+    assert "No supported explanation" in visible and "Likely cause:" not in visible
     assert "Alternatives considered" in visible
     assert all(a.value in visible for a in r.alternatives_considered) and "Causal claim" not in visible
     assert view.steps[5].experiment is not None and view.steps[5].experiment.purpose.value == "settle"

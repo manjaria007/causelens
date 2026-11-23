@@ -2,10 +2,7 @@
   "mcpServers": {
     "causelens": {
       "command": "/bin/bash",
-      "args": ["/projects/sandbox/causelens/scripts/mcp_stdio.sh"],
-      "env": {
-        "PYTHONPATH": "/projects/sandbox/causelens"
-      },
+      "args": ["scripts/mcp_stdio.sh"],
       "disabled": false
     }
   }
