@@ -49,10 +49,11 @@ Do not invent `callTool` SDK methods or an `/api/mcp/call` route.
 
 ## Local app and Discover
 
-Install and enable the app in the local Library first, review its trust request, then run dev mode.
-For personal Discover visibility, use the documented external-registry workflow and an explicit
-repo-root `app-registry.json` entry selecting `crew/causelens`. Validate its actual schema rather
-than guessing. Public official-store publication is a separate maintainer workflow, not part of this task.
+A local Library install may be used for package preflight. To complete the user's requested Discover
+workflow, configure the documented opt-in external registry and an explicit repo-root `app-registry.json`
+entry selecting `crew/causelens`; then install from Discover, review trust, enable and run dev mode.
+Validate the actual registry schema rather than guessing. Public official-store publication is a
+separate maintainer workflow, not part of this task.
 
 ## Official references
 

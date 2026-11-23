@@ -62,7 +62,8 @@ See [official installation](https://kiro.dev/docs/crew/installation/).
 > settings via the documented backup. Implement the crew-app spec one parent task at a time. Use the actual
 > installed Crew scaffold and schemas. Create the installable `crew/causelens/` app, three native agents with
 > scientist-rule prompts, a supported relative MCP launcher that survives app installation, and the console UI.
-> Preserve the numerical engine and answer-key separation. Install and enable locally, use app dev mode,
+> Preserve the numerical engine and answer-key separation. Configure the personal Discover registry,
+> install and enable from its listing, use app dev mode,
 > and run an actual Crew investigation with recorded MCP calls. Capture the native evidence below. Record
 > actual results and limitations in `KIRO_NOTES.md`; do not invent transcripts, screenshots, hook execution
 > or model responses. Open a PR with focused tests and final required checks.

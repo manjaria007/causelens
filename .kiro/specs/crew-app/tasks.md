@@ -15,8 +15,8 @@ All boxes start unchecked: cloud preparation is not native Kiro/Crew proof. Run 
   - [ ] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence
   - [ ] 3.3 Exercise insufficient-evidence and missing-data behavior without fixed reference claims
 - [ ] 4. Install and enable in Crew
-  - [ ] 4.1 Install, review trust, enable, and run `kirocrew app dev causelens`
-  - [ ] 4.2 If Discover is required, configure the documented opt-in registry and verify its listing
+  - [ ] 4.1 Configure the documented opt-in registry and verify CauseLens appears in Apps → Discover
+  - [ ] 4.2 Install from Discover, review trust, enable, and run `kirocrew app dev causelens`
 - [ ] 5. Capture genuine proof
   - [ ] 5.1 Run the reference question in Crew; capture Activity and export the parent/child transcript
   - [ ] 5.2 Capture a native MCP screenshot showing fifteen tools

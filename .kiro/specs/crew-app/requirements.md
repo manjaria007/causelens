@@ -32,9 +32,10 @@ evidence that a native Kiro or Crew session has already run it.
 
 ## Installation and evidence
 
-10. Install, trust and enable the app locally, and support `kirocrew app dev causelens` during development.
-    Local installation appears in Library. Discover visibility requires a configured registry; do not
-    claim the app is in the official catalog without a separate accepted submission.
+10. Configure an opt-in registry so the app appears in Apps → Discover, install from that listing,
+    review trust and enable it, and support `kirocrew app dev causelens` during development. A local-only
+    Library installation is useful for preflight but does not complete the requested Discover workflow.
+    Do not claim an official-catalog listing without a separate accepted submission.
 11. Save a genuine Crew transcript with visible MCP calls and the final qualified answer. If demonstrating
     three native agents, capture their actual Activity entries and outputs. SDK logs are not native-session proof.
 12. Record CLI/Crew versions and actual setup/doctor results. Capture the native Kiro MCP panel with fifteen
