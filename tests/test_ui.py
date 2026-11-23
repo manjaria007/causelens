@@ -556,3 +556,61 @@ def test_the_command_runs_without_an_event_log(files, tmp_path, capsys):
     assert cli.main(["--metrics", str(files[0]), "--no-events", "--out", str(tmp_path / "n.html")]) == 0
     assert "evidence strength: insufficient" in capsys.readouterr().out
 
+
+
+# --------------------------------------------------------------------------- review of PR #11: gaps in the series
+
+def _point(day: str, value: float, call: int = 6) -> view_module.SeriesPoint:
+    t = lambda label, v, unit: Traced(label=label, value=v, unit=unit, call=call, path="/p")
+    return view_module.SeriesPoint(date=t("day", day, "date"), sessions=t("s", 1000, "sessions"), orders=t("o", 30, "orders"),
+                                   conversion=t("c", value, "fraction"), status=t("st", "ok", "text"))
+
+
+def _panel(days: list[str]) -> TimelinePanel:
+    pts = [_point(d, 0.03 + 0.001 * i) for i, d in enumerate(days)]
+    return TimelinePanel(points=pts, first=pts[0].date, last=pts[-1].date, pre=None, post=None, best_date=None, plausible=[], events=[],
+                         excluded=[], caveat="")
+
+
+def _lines(svg: str) -> list[int]:
+    return [len(m.split()) for m in re.findall(r'<polyline points="([^"]+)"', svg)]
+
+
+def test_the_line_does_not_bridge_a_missing_day():
+    assert _lines(timeline_svg(_panel(["2026-08-01", "2026-08-02", "2026-08-04", "2026-08-05"]))) == [2, 2]
+    assert _lines(timeline_svg(_panel(["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04"]))) == [4]
+
+
+def test_a_longer_gap_and_several_gaps_each_break_the_line():
+    days = ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-10", "2026-08-11", "2026-08-13", "2026-08-14", "2026-08-15"]
+    assert _lines(timeline_svg(_panel(days))) == [3, 2, 3]
+
+
+def test_a_lone_day_between_gaps_is_a_dot_without_a_line():
+    svg = timeline_svg(_panel(["2026-08-01", "2026-08-03", "2026-08-05"]))
+    assert _lines(svg) == [] and svg.count('r="2.4"') == 3
+
+
+def test_the_line_also_breaks_across_a_missing_day_next_to_an_excluded_one():
+    pts = [_point("2026-08-01", 0.03), _point("2026-08-02", 0.031), _point("2026-08-04", 0.029), _point("2026-08-05", 0.03)]
+    pts[2] = pts[2].model_copy(update={"status": Traced(label="st", value="excluded", unit="text", call=6, path="/p")})
+    panel = _panel(["2026-08-01", "2026-08-02", "2026-08-04", "2026-08-05"]).model_copy(update={"points": pts})
+    svg = timeline_svg(panel)
+    assert _lines(svg) == [2] and svg.count('r="4.5"') == 1 and svg.count('r="2.4"') == 3
+
+
+def test_a_date_with_no_data_is_listed_on_the_page_and_the_line_stops_there(tmp_path):
+    metrics, events, _ = generate(42)
+    metrics = metrics[metrics["date"] != "2026-09-05"]
+    inv = run(*write_frames(tmp_path, metrics, events))
+    view = build_view(inv)
+    panel = next(s for s in view.steps if s.key == "locate").timeline
+    assert [d.value for d in panel.missing] == ["2026-09-05"] and len(panel.points) == 91
+    page = render_html(view)
+    visible = " ".join(parse(page).text)
+    assert "Dates with no data:" in visible and "2026-09-05" in visible and "not drawn across" in visible
+    svg = series_svg(page)
+    assert svg.count("<polyline") == 3 and sum(len(m.split()) for m in re.findall(r'<polyline points="([^"]+)"', svg)) == 90  # two breaks: 20 Sep and 5 Sep
+    assert shown_numbers(page) <= allowed_tokens(view, inv.state)
+    clean = " ".join(parse(render_html(build_view(run(*write_frames(tmp_path, *generate(42)[:2]))))).text)
+    assert "Dates with no data" not in clean

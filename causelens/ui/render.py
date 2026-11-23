@@ -158,13 +158,18 @@ def timeline_svg(p: TimelinePanel) -> str:
                      f"<title>{e(band.label)} window level {e(est)}</title></line>")
     if y is not None and daily:
         run: list[str] = []
+        previous: int | None = None
         for pt in p.points:
-            if pt.conversion is None or pt.status.value != "ok":
+            day = _ord(pt.date)
+            gap = previous is not None and day - previous > 1  # a calendar day with no point lies between: the line must not bridge it
+            previous = day
+            if gap or pt.conversion is None or pt.status.value != "ok":
                 if len(run) > 1:
                     parts.append(f'<polyline points="{" ".join(run)}" fill="none" stroke="#1d2330" stroke-width="1.2" opacity=".6"/>')
                 run = []
-                continue
-            run.append(f"{x(_ord(pt.date) + 0.5):.1f},{y(float(pt.conversion.value)):.1f}")  # type: ignore[arg-type]
+                if pt.conversion is None or pt.status.value != "ok":
+                    continue
+            run.append(f"{x(day + 0.5):.1f},{y(float(pt.conversion.value)):.1f}")  # type: ignore[arg-type]
         if len(run) > 1:
             parts.append(f'<polyline points="{" ".join(run)}" fill="none" stroke="#1d2330" stroke-width="1.2" opacity=".6"/>')
         for pt in p.points:
@@ -270,6 +275,8 @@ def timeline_html(p: TimelinePanel) -> str:
     out = [f"<h3>{e(wording.TIMELINE_TITLE)}</h3>", timeline_svg(p)]
     if p.points:
         out.append(f'<p class="mute">{e(wording.DAILY_VALUES_FROM)}{src(p.points[0].date.call)}</p>')
+    if p.missing:
+        out.append(f'<p class="mute">{e(wording.NO_DATA_ON)} ' + ", ".join(num(d) for d in p.missing) + f". {e(wording.LINE_BREAKS_AT_GAPS)}</p>")
     if p.events:
         rows = "".join(
             f"<tr><td>{chr(ord('A') + k)}</td><td>{num(ev.name)}</td><td>{num(ev.event_date)}</td><td>{num(ev.onset_date)}</td><td>{chip('v', str(ev.verdict.value))}</td></tr>"

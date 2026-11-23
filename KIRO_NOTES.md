@@ -834,3 +834,21 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   `.venv/bin/python -m ruff check causelens tests` passed.
 - Not verified: a live hosted model; other browsers, print layout, a screen reader; `daily_series` from inside Kiro (the tool list there
   has not been refreshed); per-segment daily series are supported by the tool but not drawn.
+
+### Task 10 review round 2 (PR #11): gaps in the daily series
+
+- Both bugs reproduced with failing regressions first (6 failed before the fix), then fixed.
+  1. **The line bridged missing days.** `timeline_svg` only broke the line at excluded or no-session days, so points on 1, 2, 4 and 5 August
+     drew one line across 3 August. It now breaks whenever two consecutive points are more than one calendar day apart (a lone day between
+     gaps is a dot with no line). The page also lists the dates with no data ("Dates with no data: ...", traced to the tool's
+     `missing_dates`) and says the line is not drawn across them.
+  2. **Exclusions hid missing segment dates.** `daily_series` read missing dates from the exclusion status, which overwrites "missing" on an
+     excluded date, so a mobile series with no row on a desktop-outage day reported 59 points, no missing date and 60 calendar days. Missing
+     dates are now the calendar days of the data minus the days observed in the series, independently of exclusion. The field's description
+     says so. A property test (random sparse two-segment frames, with and without exclusions) requires every calendar day to be a point or
+     listed missing, never both and never neither. `exclusions.missing_dates` inside the result is unchanged: it is the shared Task 2
+     report of dates missing from the whole data, a different thing from the series' own list.
+- Mutation checks (5: gap detection off, threshold off by one, missing from status, list not shown, list read from the wrong field): all caught.
+- I did not act on the non-blocking notes in the PR description (waterfall truncation labels, placebo explanations, output-write errors,
+  exact SVG provenance, neutral fallback wording); I cannot read the description and you did not ask for them in this round.
+- Results: `.venv/bin/python -m pytest -q`: 1,335 passed (221 s) with the ignored CSV absent, once after the last code change; Ruff passed.

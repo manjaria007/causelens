@@ -27,6 +27,8 @@ TIMELINE_LEGEND_WINDOWS = (
     "The shaded span is the plausible onset range, the dashed line the most plausible onset, red ticks are days excluded as possible tracking "
     "issues, and lettered triangles are the dates of logged events. Bands show each window's level with its interval."
 )
+NO_DATA_ON = "Dates with no data:"
+LINE_BREAKS_AT_GAPS = "The line is broken at these dates; it is not drawn across them."
 DAILY_VALUES_FROM = "Daily values were read from tool call"
 NO_DAILY_VALUES = (
     "The daily_series tool was not called in this run, so only the level of conversion in each window (with its interval) is drawn, not "

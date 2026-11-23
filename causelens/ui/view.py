@@ -94,6 +94,7 @@ class SeriesPoint(_V):
 
 class TimelinePanel(_V):
     points: list[SeriesPoint] = Field(default_factory=list, description="Daily values from the daily_series tool; empty when it was not called.")
+    missing: list[Traced] = Field(default_factory=list, description="Calendar days with no point in the series (no rows).")
     first: Traced | None
     last: Traced | None
     pre: WindowBand | None
@@ -229,6 +230,13 @@ def _series_points(t: Tracer) -> list[SeriesPoint]:
     ]
 
 
+def _series_missing(t: Tracer) -> list[Traced]:
+    call = t.state.last("daily_series")
+    if call is None or call.result is None or call.result.get("status") != "ok":
+        return []
+    return [t.value(call.seq, f"/missing_dates/{i}", "date with no data", "date") for i in range(len(call.result["missing_dates"]))]
+
+
 def _timeline(t: Tracer, result: InvestigationResult) -> TimelinePanel:
     confirm = result.confirmed_change
     bands: dict[str, WindowBand | None] = {"pre": None, "post": None}
@@ -242,7 +250,7 @@ def _timeline(t: Tracer, result: InvestigationResult) -> TimelinePanel:
     point = result.change_point
     points = _series_points(t)
     return TimelinePanel(
-        points=points, first=result.dataset.first_date if result.dataset else None, last=result.dataset.last_date if result.dataset else None,
+        points=points, missing=_series_missing(t), first=result.dataset.first_date if result.dataset else None, last=result.dataset.last_date if result.dataset else None,
         pre=bands["pre"], post=bands["post"], best_date=point.best_date if point else None,
         plausible=[point.plausible_dates[0], point.plausible_dates[-1]] if point and point.plausible_dates else [],
         events=[EventMark(name=c.event, event_date=c.event_date, onset_date=c.onset_date, verdict=c.verdict) for c in result.candidates],

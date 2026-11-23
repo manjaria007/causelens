@@ -45,7 +45,9 @@ class DailySeriesResult(BaseModel):
     first_date: Date
     last_date: Date
     points: list[DailyPoint]
-    missing_dates: list[Date]
+    missing_dates: list[Date] = Field(
+        description="Calendar days between first_date and last_date with no point in this series (no rows, for the whole data or the segment)."
+    )
     exclusions: ExclusionDisclosure
     assumptions: list[str]
     summary: str
@@ -80,7 +82,10 @@ def daily_series(
             date=pd.Timestamp(ts).date(), sessions=sessions, orders=orders, conversion=orders / sessions if sessions > 0 else None,
             status="excluded" if excluded else ("no_sessions" if sessions <= 0 else "ok"),
         ))
-    missing = [pd.Timestamp(d).date() for d in status.index[status == "missing"]]
+    # Every calendar day of the data is a point or listed here. Not derived from the exclusion status, which would hide a day that is both
+    # excluded (for the whole data) and absent from this segment.
+    observed_days = set(observed.index)
+    missing = [pd.Timestamp(d).date() for d in prepared.daily.index if d not in observed_days]
     n_excluded = sum(p.status == "excluded" for p in points)
     return DailySeriesResult(
         status="ok" if len(points) >= 2 else "insufficient_data", metric=METRIC, segment=prepared.segment,
@@ -89,7 +94,7 @@ def daily_series(
         assumptions=[
             "Each point is the day's orders divided by its sessions, for the whole data or the named segment.",
             "Excluded days show the counts that were recorded; the estimating tools do not use them.",
-            "A date with no rows has no point and is listed as missing.",
+            "A date with no rows (in the whole data, or in the named segment) has no point and is listed as missing, whether or not it was also excluded.",
         ],
         summary=f"{len(points)} day(s) with data, {n_excluded} marked excluded, {len(missing)} date(s) missing.",
     )
