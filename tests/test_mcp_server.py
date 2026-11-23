@@ -132,6 +132,7 @@ def cases(data, prior, registry) -> dict[str, Case]:
             {**ds, "quality": as_json(q), "search_window": window(("2026-09-01", "2026-10-31")), "min_segment_days": 5},
             lambda: A.detect_change_point(m, e, quality=q, search_window=("2026-09-01", "2026-10-31"), min_segment_days=5),
         ),
+        Case("daily_series", "daily_series", {**ds, "segment": FOCAL, "quality": as_json(q)}, lambda: A.daily_series(m, e, segment=FOCAL, quality=q)),
         Case(
             "match_event_candidates", "match_event_candidates", {**ds, "change_point": as_json(cp), "lead_days": 5},
             lambda: A.match_event_candidates(cp, e, lead_days=5),
@@ -193,7 +194,7 @@ def cases(data, prior, registry) -> dict[str, Case]:
 
 
 CASE_NAMES = [
-    "list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "match_event_candidates", "decompose_change",
+    "list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "daily_series", "match_event_candidates", "decompose_change",
     "test_candidates", "test_event_scope", "estimate_did", "check_pre_trends", "run_placebo", "project_impact", "power_analysis",
     "design_experiment", "design_experiment_each_candidate",
 ]

@@ -166,12 +166,12 @@ def test_each_role_is_interpreted_right_after_its_stages_and_before_the_next_rol
     n = len(inv.state.log)
     assert spy.events == [
         ("choose", "Detective", "confirm_change", 2), ("choose", "Detective", "match_event_candidates", 4),
-        ("choose", "Detective", "decompose_change", 5), ("interpret", "Detective", 6, 0),
-        ("choose", "Scientist", "test_candidates", 6), ("interpret", "Scientist", n - 1, 1),
+        ("choose", "Detective", "decompose_change", 6), ("interpret", "Detective", 7, 0),
+        ("choose", "Scientist", "test_candidates", 7), ("interpret", "Scientist", n - 1, 1),
         ("interpret", "Experiment designer", n, 1),
     ]
     detective_calls = {c.seq for c in inv.state.log if c.role == "Detective"}
-    assert max(detective_calls) == 6
+    assert max(detective_calls) == 7
 
 
 def test_a_role_that_hit_a_failure_still_reports_what_it_found(files):
@@ -247,7 +247,7 @@ def test_a_model_reasoner_gets_the_rules_the_evidence_and_the_allowed_claims(fil
     assert {e["tool"] for e in scientist["evidence"]} >= {"check_data_quality", "test_candidates", "estimate_did"}
     detective = next(p for _, p, _ in model.asked if p["task"] == "interpret" and p["role"] == "Detective")
     assert {e["tool"] for e in detective["evidence"]} == {"list_datasets", "check_data_quality", "confirm_change", "detect_change_point",
-                                                         "match_event_candidates", "decompose_change"}  # a role sees what has run so far
+                                                         "match_event_candidates", "decompose_change", "daily_series"}  # a role sees what has run so far
     texts = [s.text for s in inv.result.statements]
     assert "The data check excluded 2026-09-20." in texts
     (claim,) = [s for s in inv.result.statements if s.kind == "causal_claim"]

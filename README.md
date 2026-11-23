@@ -13,10 +13,9 @@ Built for Kiroween with spec-driven development in Kiro:
 Implemented and merged: the synthetic dataset generator (Task 1), data loading and quality checks, change
 confirmation and change point, localization, candidate testing with a difference-in-differences estimate, and
 experiment design (Tasks 2 to 6), the read-only MCP server (Task 7), and the investigation orchestrator with its three
-roles and a traced, structured result (Task 8). The ground-truth evaluation (Task 9) is in review:
-`python -m causelens.eval --seeds 20` runs full investigations on 20 seeds and grades them against the answer key
-(`docs/evaluation.md`). The investigation console (Task 10) is planned in
-`.kiro/specs/metric-investigation/tasks.md` and not started. Method and measured behaviour are in `docs/`.
+roles and a traced, structured result (Task 8), the ground-truth evaluation (`python -m causelens.eval --seeds 20`,
+`docs/evaluation.md`, Task 9), and the investigation console (Task 10, in review): `python -m causelens.ui --out console.html`
+writes a six-step page with an evidence panel for each step (`docs/console.md`). Method and measured behaviour are in `docs/`.
 
 The requirements, design, task plan, and steering files under `.kiro/` are authoritative. Preserve that directory and
 its development history. Tasks are run one parent task at a time in Kiro, each reviewed and tested before the next.

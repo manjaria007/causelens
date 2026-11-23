@@ -763,3 +763,92 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   interval's coverage, and the docs point to the Task 5 null calibration for the coverage property. A test pins the wording.
 - Results: `.venv/bin/python -m pytest -q`: 1,271 passed (199 s), once after the last code change; `.venv/bin/python -m ruff check
   causelens tests` passed. The 20-seed result is unchanged (14/20 all criteria; 16/20, 19/20, 18/20, 20/20, 14/20 by criterion).
+
+## Task 10: investigation console (branch `task-10-investigation-console`)
+
+- Built from `origin/main` at `963c7ef` (PR #10, Task 9, merged; checked with `git merge-base --is-ancestor` after a fetch). Your Mac
+  `.kiro/settings/mcp.json` edit stayed unstaged and uncommitted. Read first: `tasks.md` (Task 10, 10.1, 10.2), requirement 8.3 (and 8.2,
+  8.4 for what the console shows), the design, all three steering files, and the Task 8 result model and tracing code.
+- What it is: `causelens/ui/` and `python -m causelens.ui --out console.html`. It runs the Task 8 orchestrator through an in-process MCP
+  server (or `--server URL`) with the template reasoner and writes one self-contained HTML page (no script, no network, inline SVG): six
+  steps (detect, locate, localize, test, estimate, recommend), each with its evidence, and a table of the logged calls. Panels: level
+  before and after with the change point, segment waterfall, difference-in-differences chart, placebo chart, plus the candidate cards with
+  alternatives, lag sensitivity and share confidence sets.
+- **Numbers.** The view is built from the structured result and, for the panels, from logged MCP results through a `Tracer`; `build_view`
+  re-reads every traced value from the log before rendering. The renderer only formats traced values. No chart-axis tick labels are
+  printed (they would be numbers nobody returned). Every number links to its call number in a provenance table, with the exact value in
+  a tooltip. Added `TracedBand` (an interval without a sample size, for placebo dates) and `Tracer.band` to `agents/trace.py`; nothing
+  else outside `causelens/ui/` changed.
+- **Preserved on the page, in every run:** evidence strength with reasons (top), a data-quality warning when days were excluded or flags
+  raised, intervals with level and sample sizes next to every estimate, p-values only next to their effect, the alternatives and why each
+  was kept or set aside, rejection grounds worded as rejections of a named hypothesis, assumptions beside the estimate, a causal claim only
+  where `assess_claim` allows it and labelled as a separate attribution, and the stop reason and not-run steps when an investigation stops.
+- **Deviation from the design, stated plainly:** the spec asks for a *series* with the change point. No MCP tool returns daily values and you
+  asked for existing results only, so the panel shows the conversion level in each window (with its interval) against the change point,
+  the plausible range, the candidate events and the excluded days, and says so on the page. A real daily series needs a new tool, which
+  is a Task 7 change; I did not make it.
+- Decisions: six console steps map onto the seven stages (detect = validate + confirm); the waterfall is the localized partition's top 12
+  segments by rank; display precision is fixed (three decimals for pp) with exact values in tooltips; the page is static.
+- Mistakes of mine caught by my checks: my own fixed phrases used "because" (the wording test caught it, twice); the dataset facts
+  (call 1) were not shown anywhere, so there was no link target for call 1 (found by the link test, now a "Data" line with fingerprints);
+  a "yes" bullet for the sole-source rejection ground had lost its label; a first numeric-token check let call numbers stand in for data
+  numbers, so call numbers are now allowed only inside the source superscripts; the guardrail list showed names and details as one flat
+  list. Reviewed by screenshot in headless Chrome (reference run, steps 1-6).
+- Mutation checks (17: waterfall limit and order, wrong field for contribution, source links, interval bounds, strength block hidden, alternatives
+  dropped, data-quality banner, escaping, a derived count, assumptions, stop banner, CSP, claim label, not-run steps shown as done, statement
+  placement, placebo). First pass missed 4 (the 12-row limit, a hidden strength block, alternatives that also appear in the written summary,
+  the stop banner) and one derived-count mutation that collided with a real number; each now has a test, and all are caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,307 passed (207 s), once after the last code change; `.venv/bin/python -m ruff check causelens
+  tests` passed. 36 new tests in `tests/test_ui.py`. No analytics changed, so no calibration was rerun.
+- **Not verified:** a live hosted model (the console uses the template reasoner; `ModelReasoner` has only been run with scripted models);
+  other browsers, print layout, or a screen reader; a daily series panel (see above).
+
+### Task 10 review round 1 (PR #11)
+
+- **The series panel is now a daily series (10.2).** I had substituted two window levels and said so; that did not complete the requirement.
+  New read-only tool `daily_series` (`causelens/analytics/daily.py`, the 15th MCP tool): for each day with data, sessions, orders and
+  conversion (orders / sessions), the days Task 2 excluded marked `excluded` with their recorded counts still shown, and missing dates
+  listed. A description only: no tool reads it, no decision rule changed, and the 20-seed evaluation gives identical rates (14/20 all
+  criteria; 16, 19, 18, 20, 14 by criterion). The Detective calls it once, after the change point, so it is logged (13 calls now, not 12) and
+  the console reads it from the log: 92 points, each date, count and conversion traced. The panel draws a dot per day, a line broken at
+  excluded days (hollow red dots), the window levels as faint bands, the change point, plausible range and event dates, with the highest and
+  lowest ordinary days labelled and no axis tick labels. If a run has no daily series the panel falls back to the window levels and says so.
+  Property tests (`tests/test_daily_series.py`): points are the days with data in date order and gaps are listed; conversion is exactly
+  orders / sessions and totals are preserved; row order is irrelevant; a segment is the sum of its rows; excluded days keep their counts;
+  agreement with `confirm_change` on the windows (days, sessions, orders and the pooled rate).
+- Because the tool list changed: `TOOL_NAMES`, the Detective's tools, the Kiro example configs' `autoApprove`, `docs/mcp-server.md`
+  (the historical "14 tools" Kiro CLI verification is kept and marked as predating the 15th tool; it has not been re-checked from Kiro),
+  `docs/agents.md`, `docs/console.md`, and the call numbers hard-coded in several agents and UI tests.
+- **Clean-checkout failure fixed.** The console command test relied on the ignored `data/metrics_daily.csv`; it now passes the `files`
+  fixture's `--metrics` and `--events`. To check the class of problem rather than the one test, I ran the whole suite with
+  `data/metrics_daily.csv` moved away (1,327 passed), then restored it.
+- **Presentation items.** I could not read the PR notes (the API returned nothing for the PR's comments), so I fixed what you named and
+  checked it myself: below 640 px the facts stack, tables scroll sideways and text wraps (checked by screenshot at 500 px, the narrowest
+  headless Chrome would render; at that width nothing overflowed). My first rule `overflow-wrap:anywhere` on table cells broke words
+  mid-word ("device=mo bile"); removed. Every chart mark (day dots, bands, markers, waterfall bars and labels, forest rows) now has a
+  tooltip, and a test checks that no circle, rect or path lacks one. If your list has other items, tell me which.
+- Mutation checks on the new code (14): excluded days not marked, counts blanked, conversion rounded, segment ignored, exclusions flag
+  ignored, missing dates dropped, line not broken at an excluded day, min and max swapped, source link dropped, excluded drawn as ordinary,
+  wrong field, daily call omitted, mobile CSS dropped, tooltips dropped. All caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,327 passed (217 s), once after the last code change and with the ignored CSV absent;
+  `.venv/bin/python -m ruff check causelens tests` passed.
+- Not verified: a live hosted model; other browsers, print layout, a screen reader; `daily_series` from inside Kiro (the tool list there
+  has not been refreshed); per-segment daily series are supported by the tool but not drawn.
+
+### Task 10 review round 2 (PR #11): gaps in the daily series
+
+- Both bugs reproduced with failing regressions first (6 failed before the fix), then fixed.
+  1. **The line bridged missing days.** `timeline_svg` only broke the line at excluded or no-session days, so points on 1, 2, 4 and 5 August
+     drew one line across 3 August. It now breaks whenever two consecutive points are more than one calendar day apart (a lone day between
+     gaps is a dot with no line). The page also lists the dates with no data ("Dates with no data: ...", traced to the tool's
+     `missing_dates`) and says the line is not drawn across them.
+  2. **Exclusions hid missing segment dates.** `daily_series` read missing dates from the exclusion status, which overwrites "missing" on an
+     excluded date, so a mobile series with no row on a desktop-outage day reported 59 points, no missing date and 60 calendar days. Missing
+     dates are now the calendar days of the data minus the days observed in the series, independently of exclusion. The field's description
+     says so. A property test (random sparse two-segment frames, with and without exclusions) requires every calendar day to be a point or
+     listed missing, never both and never neither. `exclusions.missing_dates` inside the result is unchanged: it is the shared Task 2
+     report of dates missing from the whole data, a different thing from the series' own list.
+- Mutation checks (5: gap detection off, threshold off by one, missing from status, list not shown, list read from the wrong field): all caught.
+- I did not act on the non-blocking notes in the PR description (waterfall truncation labels, placebo explanations, output-write errors,
+  exact SVG provenance, neutral fallback wording); I cannot read the description and you did not ask for them in this round.
+- Results: `.venv/bin/python -m pytest -q`: 1,335 passed (221 s) with the ignored CSV absent, once after the last code change; Ruff passed.

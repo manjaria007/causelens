@@ -91,7 +91,7 @@ later starts about 4 s, so a client with a short connect timeout may need a seco
 `causelens` as running with 14 tools and made the four calls through its attached MCP tools. `list_datasets` returned
 5,888 reference rows; `power_analysis` returned 8,158 sessions per arm; `check_data_quality` returned `excluded_dates`
 exactly `["2026-09-20"]` with the desktop tracking flag; and the JSON boolean `mde_pp: true` was rejected. These were
-native Kiro CLI calls, not a terminal SDK probe. The actual results and fingerprints are recorded in `KIRO_NOTES.md`.
+native Kiro CLI calls, not a terminal SDK probe. That session predates the fifteenth tool, `daily_series`, added in Task 10; it has not been re-checked from Kiro. The actual results and fingerprints are recorded in `KIRO_NOTES.md`.
 
 **Kiro Web unresolved.** Saved Web Agent Config entries and repository configuration have not made the CauseLens tools
 available in the tested Web sessions. [Kiro issue #12523](https://github.com/kirodotdev/Kiro/issues/12523) tracks the
@@ -103,7 +103,7 @@ For a Kiro Web connection check, use the procedure below and record actual respo
    workspace (the Kiro Web workspace root is `/projects/sandbox`). Leave `autoApprove` out for the first run if you want to
    see each call. (In the Kiro Web sandbox that built this server, `/projects/sandbox/.kiro/settings/` was read-only to the
    agent, so the file could not be written from a session and has to be added from Kiro's MCP settings or by hand.)
-2. Start a **new** Kiro session so the server loads, and confirm `causelens` is listed with 14 tools in the MCP panel.
+2. Start a **new** Kiro session so the server loads, and confirm `causelens` is listed with 15 tools in the MCP panel (14 before Task 10 added `daily_series`).
 3. Ask Kiro to call `list_datasets`, then `power_analysis` with `baseline: 0.05, mde_pp: 1.0`, then
    `check_data_quality` on `reference`. Expect: dataset `reference` with 5,888 rows; 8,158 sessions per arm; excluded date
    `2026-09-20`.
@@ -122,6 +122,7 @@ unknown arguments (`additionalProperties: false`), so a misspelt option is an er
 | `check_data_quality` | `check_data_quality` | | `DataQualityReport` |
 | `confirm_change` | `confirm_change` | `quality` | `ConfirmChangeResult` |
 | `detect_change_point` | `detect_change_point` | `quality` | `ChangePointResult` |
+| `daily_series` | `daily_series` | `quality` | `DailySeriesResult` |
 | `match_event_candidates` | `match_event_candidates` | `change_point` | `CandidateMatchResult` |
 | `decompose_change` | `decompose_change` | `quality` | `DecompositionResult` |
 | `test_candidates` | `test_candidates` | `decomposition`, `quality` | `CandidateTestingResult` |
@@ -133,7 +134,8 @@ unknown arguments (`additionalProperties: false`), so a misspelt option is an er
 | `power_analysis` | `power_analysis` | | `PowerResult` |
 | `design_experiment` | `design_experiment` | `candidate_testing`, `quality` | `ExperimentDesign` |
 
-The table has the eleven tools from the design, plus `test_candidates` and `match_event_candidates` (the Task 3 and
+The table has the eleven tools from the design, plus `daily_series` (Task 10: the daily values the console draws; a description, not a
+test), `test_candidates` and `match_event_candidates` (the Task 3 and
 Task 5 entry points an investigation needs between them) and `list_datasets`. Library helpers that are not tools in the
 design (`normal_approx_power`, `two_proportion_test`, `benjamini_hochberg`, the loaders and validators) are not exposed.
 
@@ -233,7 +235,7 @@ tool schemas into context can use Kiro's `disabledTools` for the tools they do n
 `tests/test_mcp_datasets.py` (configuration) and `tests/test_mcp_review.py` (the PR #7 review: binding, strict values, the
 answer key behind a link, malformed configuration):
 
-* **Initialization and discovery** with both the automatic and the legacy handshake; 14 tools, read-only annotations,
+* **Initialization and discovery** with both the automatic and the legacy handshake; 15 tools (14 until Task 10), read-only annotations,
   object schemas that are valid JSON Schema, `additionalProperties: false`, and no tool with a path or URL argument.
 * **Schemas.** Output schemas are generated from the analytics models; every published default equals the analytics
   default; every analytics parameter is exposed; arguments (including full prior results) and results validate against

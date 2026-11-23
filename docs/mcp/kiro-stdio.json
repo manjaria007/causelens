@@ -18,6 +18,7 @@
         "check_data_quality",
         "confirm_change",
         "detect_change_point",
+        "daily_series",
         "match_event_candidates",
         "decompose_change",
         "test_candidates",

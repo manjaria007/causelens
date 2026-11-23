@@ -13,6 +13,7 @@ from causelens.analytics.changepoint import (
     match_event_candidates,
 )
 from causelens.analytics.confirm import ConfirmChangeResult, confirm_change
+from causelens.analytics.daily import DailyPoint, DailySeriesResult, daily_series
 from causelens.analytics.data_quality import (
     DataQualityFlag,
     DataQualityReport,
@@ -76,6 +77,8 @@ __all__ = [
     "CandidateVerdict",
     "ChangePointResult",
     "ConfirmChangeResult",
+    "DailyPoint",
+    "DailySeriesResult",
     "DataQualityFlag",
     "DataQualityReport",
     "DataValidationError",
@@ -105,6 +108,7 @@ __all__ = [
     "check_data_quality",
     "check_pre_trends",
     "confirm_change",
+    "daily_series",
     "day_level_test",
     "decompose_change",
     "design_experiment",

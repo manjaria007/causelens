@@ -49,14 +49,14 @@ sent.
 
 | Role | Stages | Tools |
 |---|---|---|
-| Detective | validate, confirm, change point, localize | `list_datasets`, `check_data_quality`, `confirm_change`, `detect_change_point`, `match_event_candidates`, `decompose_change` |
+| Detective | validate, confirm, change point, localize | `list_datasets`, `check_data_quality`, `confirm_change`, `detect_change_point`, `match_event_candidates`, `daily_series`, `decompose_change` |
 | Scientist | test, estimate | `test_candidates`, `test_event_scope`, `estimate_did`, `run_placebo`, `check_pre_trends`, `project_impact` |
 | Experiment designer | recommend | `power_analysis`, `design_experiment` |
 
 The design table lists four Detective tools and five Scientist tools. `list_datasets` (the dataset fingerprints in the report),
 `match_event_candidates` (Task 3.3) and `test_candidates` (the Task 5 entry point that runs the joint timing model over all
-candidates) were added in Task 7 and are assigned here. The two roles' tools are disjoint and together cover all 14 server
-tools. The designer's `power_analysis` is available but not called: `design_experiment` already sizes from it.
+candidates) were added in Task 7 and are assigned here; `daily_series` (the daily values the console draws) was added in Task 10 and
+belongs to the Detective. The three roles' tools are disjoint and together cover all 15 server tools. The designer's `power_analysis` is available but not called: `design_experiment` already sizes from it.
 
 `Role.system_prompt()` is what a model-backed reasoner receives: the role's instructions, its tools, the writing contract, and
 `.kiro/steering/scientist-rules.md` verbatim (read from the file at call time, an error if it is missing).
@@ -67,8 +67,8 @@ tools. The designer's `power_analysis` is available but not called: `design_expe
    later call, so the same days are excluded throughout.
 2. **confirm** `confirm_change`. If the result is `insufficient_data`, or the change is not distinguishable from noise, the run
    stops (Requirement 2.3) with evidence `insufficient` and the tool's own "data needed" figures.
-3. **change point** `detect_change_point`, then `match_event_candidates` when a change is detected and an event log exists.
-   A match is a date coincidence.
+3. **change point** `detect_change_point`, then `match_event_candidates` when a change is detected and an event log exists (a match
+   is a date coincidence), then `daily_series` (the daily values the console draws; a description that no later step reads).
 4. **localize** `decompose_change`. Segment scans are FDR-controlled by the tool; the result reports the family and the count.
 5. **test** `test_candidates` with the localization and quality report. Skipped when the dataset has no event log.
 6. **estimate** for each candidate the tests mark `supported`: `estimate_did`, `check_pre_trends`, `run_placebo`,
