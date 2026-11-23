@@ -34,6 +34,7 @@ CSS = """
 *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--pos)}header,main,footer{max-width:1040px;margin:0 auto;padding:16px 20px}
 h1{font-size:1.5rem;margin:.2rem 0}h2{font-size:1.25rem;margin:0 0 .4rem}h3{font-size:1.05rem;margin:.8rem 0 .3rem}
+.headline{margin:.6rem 0}.headline>p:first-child{font-size:1.25rem;margin:0}.headline .caveat{margin:.3rem 0}
 section.step{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin:16px 0}
 .intro,.caveat,.mute{color:var(--mute)}.caveat{font-size:.9rem}
 nav ol{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:8px 0}
@@ -412,12 +413,50 @@ def step_html(s: StepView) -> str:
     return "".join(out)
 
 
+def _headline_segment(t: Traced) -> str:
+    """A friendly device/browser label, retaining the exact logged label and source."""
+    label = str(t.value)
+    parts = [part.partition("=") for part in label.split(", ")]
+    dims = {key: value for key, separator, value in parts if separator and value and "," not in value}
+    if len(dims) == len(parts) and set(dims) <= {"device", "browser"}:
+        browser = dims.get("browser", "")
+        label = " ".join(x for x in (dims.get("device", ""), browser[:1].upper() + browser[1:]) if x)
+    tip = e("exact: " + exact(t.value) + "; " + t.path)
+    return f'<span class="num" title="{tip}">{e(label)}</span>{src(t.call)}'
+
+
+def headline_html(v: ConsoleView) -> str:
+    """Summarize only an eligible attribution; incomplete or unchecked runs stay neutral."""
+    r = v.result
+    if r.status != "completed":
+        return '<div class="headline"><p><strong>Investigation incomplete</strong></p></div>'
+    supported = [c for c in r.candidates if c.verdict.value == "supported"]
+    if len(supported) != 1:
+        text = "No supported explanation" if not supported else "No single explanation established"
+        return f'<div class="headline"><p><strong>{text}</strong></p></div>'
+    candidate = supported[0]
+    estimates = [x for x in r.causal_estimates if x.event.value == candidate.event.value and x.claim.event == candidate.event.value
+                 and x.claim.allowed and x.design == "difference-in-differences" and x.effect_pp is not None]
+    if len(estimates) != 1 or r.evidence.strength not in ("strong", "moderate"):
+        return '<div class="headline"><p><strong>Attribution not established</strong></p></div>'
+    estimate = estimates[0]
+    focal = estimate.focal if str(estimate.focal.value).strip() else None
+    if focal is None and r.localization is not None and len(r.localization.segments) == 1:
+        focal = r.localization.segments[0]
+    segment = f" · {_headline_segment(focal)}" if focal is not None else ""
+    assumptions = "".join(f"<li>{num(a)}</li>" for a in estimate.assumptions)
+    return (f'<div class="headline" role="group" aria-label="Investigation headline"><p><strong>Likely cause: {num(candidate.event)}{segment}</strong></p>'
+            f'<p class="caveat">Difference-in-differences, conditional on evaluated lag {num(candidate.lag_days)} '
+            f'(onset {num(candidate.onset_date)}); evidence strength: {e(r.evidence.strength)}. {num(candidate.attribution_note)}</p>'
+            f'<details><summary>Assumptions behind this attribution</summary><ul class="plain">{assumptions}</ul></details></div>')
+
+
 def header_html(v: ConsoleView) -> str:
     r = v.result
     strength = r.evidence
     base = f" (base assessment: {e(strength.base_strength)}; see the reasons)" if strength.base_strength and strength.base_strength != strength.strength else ""
     reasons = "".join(f"<li>{num(x)}</li>" for x in strength.reasons)
-    parts = [f"<h1>{e(r.question)}</h1>",
+    parts = [f"<h1>{e(r.question)}</h1>", headline_html(v),
              f'<p>Run status: {chip("st", "done" if r.status == "completed" else "stopped")} <span class="mute">{e(r.status.replace("_", " "))}</span></p>']
     if r.status != "completed":
         parts.append(f'<div class="banner stop"><strong>The investigation stopped</strong>{" at the " + e(r.stopped_stage) + " stage" if r.stopped_stage else ""}. '

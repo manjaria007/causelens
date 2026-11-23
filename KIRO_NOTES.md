@@ -852,3 +852,34 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
 - I did not act on the non-blocking notes in the PR description (waterfall truncation labels, placebo explanations, output-write errors,
   exact SVG provenance, neutral fallback wording); I cannot read the description and you did not ask for them in this round.
 - Results: `.venv/bin/python -m pytest -q`: 1,335 passed (221 s) with the ignored CSV absent, once after the last code change; Ruff passed.
+
+### Supporting delivery preparation after Task 10 (Codex)
+
+- The user's delivery request was handled as supporting work after the Kiro implementation. PR #11 was
+  already merged at `f3eba9d`; no second merge was made. The metric-investigation tasks remain complete.
+- The workspace MCP configuration now uses the relative `scripts/mcp_stdio.sh` launcher and no explicit
+  sandbox `PYTHONPATH`. It requires starting the client from the clone root; the launcher resolves its
+  own root. The prepared-checkout example also uses relative interpreter/data paths.
+- Both configurations were exercised over real stdio from two local clones, including a directory with
+  spaces. All four probes listed fifteen tools, returned the reference data and expected quality/power
+  results, rejected a boolean MDE, and preserved the committed events and ground truth. Runtime packages
+  were supplied by a test-only venv symlink; dependency installation and native Kiro activation were not
+  claimed by this portability test.
+- The console headline is derived from the result and stays neutral unless a completed run has one
+  supported candidate with an allowed DiD attribution. Its lag, evidence and ambiguity remain visible.
+  The reference title is "Likely cause: Checkout v4.2 · mobile Safari"; it is not a fixed answer for other runs.
+- A separate `.kiro/specs/crew-app/` plan and `docs/crew-handoff.md` were prepared for Kiro. All new task
+  boxes are unchecked. The three native Crew agents, installable app and native demo transcript have not
+  been implemented or verified by creating these specification files.
+- Crew 0.13.1 was installed in an isolated cloud environment, and `setup --agent-only` plus `doctor`
+  were run. Setup reported no Kiro CLI on that host. This is not the user's Mac installation, an
+  authenticated model run, a native hook firing, or a screenshot of the Mac MCP panel.
+- GitHub Pages/About settings could not be changed through the connected toolset, and the cloud GitHub
+  CLI failed authentication. The handoff gives the exact Pages source, intended demo URL and About text;
+  no live public site or settings change is claimed merely from preparing the static artifact.
+- Validation: 63 targeted UI/MCP CLI tests passed; the final full suite ran once with the ignored CSV
+  absent and passed 1,343 tests (737 s); Ruff and `git diff --check` passed. Both clone locations and both
+  stdio configs passed the portability probe. The exported demo was checked in Chromium at desktop
+  and 390px widths: the requested result-driven headline, six steps, no scripts/external requests or
+  page overflow. The installed Crew UI scaffold was created in scratch and its sample agent schema
+  validated with zero problems; this was not the CauseLens app implementation.
