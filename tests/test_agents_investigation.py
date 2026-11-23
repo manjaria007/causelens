@@ -83,8 +83,8 @@ def test_the_stages_run_in_order_under_the_right_roles(reference_run):
         ("recommend", "Experiment designer", "done"),
     ]
     assert [c.tool for c in reference_run.state.log] == [
-        "list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "match_event_candidates", "decompose_change",
-        "test_candidates", "estimate_did", "check_pre_trends", "run_placebo", "project_impact", "design_experiment",
+        "list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "match_event_candidates", "daily_series",
+        "decompose_change", "test_candidates", "estimate_did", "check_pre_trends", "run_placebo", "project_impact", "design_experiment",
     ]
     covered = [n for s in stages for n in s.calls]
     assert covered == list(range(1, len(reference_run.state.log) + 1))
@@ -104,7 +104,7 @@ def test_prior_results_are_logged_as_pointers_to_the_call_that_produced_them(ref
             if isinstance(value, dict) and "$prior" in value:
                 assert value["$prior"] < call.seq
                 assert log[value["$prior"] - 1].tool in {"check_data_quality", "detect_change_point", "decompose_change", "test_candidates", "estimate_did"}
-    assert Counter(c.arguments.get("quality", {}).get("$prior") for c in log if "quality" in c.arguments) == {2: 9}  # every analysis after the data check reuses its exclusions
+    assert Counter(c.arguments.get("quality", {}).get("$prior") for c in log if "quality" in c.arguments) == {2: 10}  # every analysis after the data check reuses its exclusions
 
 
 # --------------------------------------------------------------------------- scientist rules
@@ -316,7 +316,7 @@ def test_a_dataset_without_an_event_log_skips_candidate_testing(files, tmp_path)
     r = inv.result
     assert r.status == "completed" and r.candidates == [] and r.dataset.events_sha256 is None
     assert "no event log" in r.evidence.reason and r.evidence.strength == "insufficient"
-    assert {c.tool for c in inv.state.log} == {"list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "decompose_change"}
+    assert {c.tool for c in inv.state.log} == {"list_datasets", "check_data_quality", "confirm_change", "detect_change_point", "daily_series", "decompose_change"}
     assert [(s.stage, s.outcome) for s in inv.state.stages if s.outcome == "skipped"] == [("test", "skipped"), ("estimate", "skipped"), ("recommend", "skipped")]
     verify_traces(r, inv.state)
 
@@ -373,7 +373,7 @@ def test_statements_that_break_the_rules_are_dropped_and_recorded(files):
         Statement(role="Detective", kind="finding", text="The hero refresh caused the drop.", refs={}),  # a cause, no design
         Statement(role="Detective", kind="finding", text="Effect is {v}.", refs={"v": Ref(call=3, path="/no/such/field")}),
         Statement(role="Scientist", kind="causal_claim", text="The release caused {v}.",
-                  refs={"v": Ref(call=7, path="/candidates/1/lag_days", fmt="count")}),  # cites the candidate test, not a DiD
+                  refs={"v": Ref(call=8, path="/candidates/1/lag_days", fmt="count")}),  # cites the candidate test, not a DiD
     ]
     inv = with_reasoner(files, [good, *hostile])
     r = inv.result

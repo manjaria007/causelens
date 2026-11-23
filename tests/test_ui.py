@@ -158,7 +158,7 @@ def test_each_step_lists_the_calls_that_produced_its_evidence(reference_view, re
     by_step = {s.key: s.calls for s in reference_view.steps}
     tools = {k: [reference_run.state.call(c).tool for c in calls] for k, calls in by_step.items()}
     assert tools == {
-        "detect": ["list_datasets", "check_data_quality", "confirm_change"], "locate": ["detect_change_point", "match_event_candidates"],
+        "detect": ["list_datasets", "check_data_quality", "confirm_change"], "locate": ["detect_change_point", "match_event_candidates", "daily_series"],
         "localize": ["decompose_change"], "test": ["test_candidates"],
         "estimate": ["estimate_did", "check_pre_trends", "run_placebo", "project_impact"], "recommend": ["design_experiment"],
     }
@@ -182,7 +182,7 @@ def test_the_timeline_panel_shows_the_window_levels_the_change_point_events_and_
     assert p.best_date.value == "2026-10-15" and [d.value for d in p.plausible] == ["2026-10-14", "2026-10-15"]
     assert [d.value for d in p.excluded] == ["2026-09-20"]
     assert {(e.name.value, e.verdict.value) for e in p.events} == {(CHECKOUT, "supported"), (HERO, "rejected")}
-    assert "No MCP tool returns daily values" in p.caveat  # the panel does not pretend to be a daily series
+    assert p.caveat == "" and len(p.points) == 92  # a daily series, one point per day
 
 
 def test_the_waterfall_panel_is_the_localized_partition_with_the_tools_own_contributions(reference_view, reference_run):
@@ -264,6 +264,72 @@ def test_the_waterfall_draws_only_the_highest_ranked_segments(monkeypatch, refer
     assert [r.rank.value for r in w.rows] == [1, 2, 3]
 
 
+def series_svg(page: str) -> str:
+    start = page.index('aria-labelledby="tl-t tl-d"')
+    return page[start : page.index("</svg>", start)]
+
+
+def test_the_series_panel_draws_every_logged_day(reference_view, reference_run, reference_page):
+    panel = next(s for s in reference_view.steps if s.key == "locate").timeline
+    logged = reference_run.state.last("daily_series").result["points"]
+    assert len(panel.points) == len(logged) == 92
+    assert [p.date.value for p in panel.points] == [q["date"] for q in logged]
+    assert [p.conversion.value for p in panel.points] == [q["conversion"] for q in logged]
+    assert [(p.sessions.value, p.orders.value) for p in panel.points] == [(q["sessions"], q["orders"]) for q in logged]
+    svg = series_svg(reference_page)
+    assert svg.count('r="2.4"') == 91 and svg.count('r="4.5"') == 1  # 91 ordinary days and the one excluded day
+    assert '<circle cx=' in svg and 'stroke="#b3261e" stroke-width="2"><title>2026-09-20:' in svg
+    assert svg.count("<polyline") == 2  # the excluded day breaks the line
+    vertices = sum(len(m.split()) for m in re.findall(r'<polyline points="([^"]+)"', svg))
+    assert vertices == 91
+
+
+def test_every_day_has_a_tooltip_with_its_recorded_counts(reference_view, reference_page):
+    panel = next(s for s in reference_view.steps if s.key == "locate").timeline
+    svg = series_svg(reference_page)
+    for p in panel.points[:5] + [q for q in panel.points if q.status.value == "excluded"]:
+        assert f"{fmt_traced(p.date)}: {fmt_traced(p.conversion)} ({fmt_traced(p.orders)} orders of {fmt_traced(p.sessions)} sessions)" in svg
+    assert "excluded day" in svg
+
+
+def test_the_highest_and_lowest_ordinary_days_are_labelled_with_their_logged_values(reference_view, reference_page):
+    panel = next(s for s in reference_view.steps if s.key == "locate").timeline
+    ordinary = [p for p in panel.points if p.status.value == "ok"]
+    hi, lo = max(ordinary, key=lambda p: p.conversion.value), min(ordinary, key=lambda p: p.conversion.value)
+    svg = series_svg(reference_page)
+    assert f"{fmt_traced(hi.conversion)} on {fmt_traced(hi.date)}" in svg and f"{fmt_traced(lo.conversion)} on {fmt_traced(lo.date)}" in svg
+    assert (lo.conversion.value, lo.date.value) != (hi.conversion.value, hi.date.value)
+
+
+def test_the_series_panel_names_its_source_call(reference_page, reference_run):
+    seq = reference_run.state.last("daily_series").seq
+    assert "Daily values were read from tool call" in " ".join(parse(reference_page).text) and f'href="#call-{seq}"' in reference_page
+
+
+def test_without_the_daily_tool_the_panel_says_it_shows_only_window_levels(reference_run):
+    state = reference_run.state.model_copy(deep=True)
+    call = state.last("daily_series")
+    state.log[call.seq - 1] = call.model_copy(update={"result": {**call.result, "status": "insufficient_data"}})
+    view = build_view(Investigation(state=state, result=reference_run.result))
+    panel = next(s for s in view.steps if s.key == "locate").timeline
+    page = render_html(view)
+    assert panel.points == [] and wording.NO_DAILY_VALUES == panel.caveat
+    assert "<polyline" not in page and "not a daily series" in " ".join(parse(page).text)
+    assert shown_numbers(page) <= allowed_tokens(view, state)
+
+
+def test_every_chart_mark_has_a_tooltip(reference_page):
+    assert not re.findall(r"<(?:circle|rect|path)\b[^>]*(?<!/)>(?!<title>)", reference_page)
+    assert not re.findall(r"<(?:circle|rect|path)\b[^>]*/>", reference_page)
+    assert "the estimate being checked: " in reference_page and "contribution " in reference_page
+
+
+def test_the_page_reflows_on_a_narrow_screen(reference_page):
+    css = reference_page[reference_page.index("<style>") : reference_page.index("</style>")]
+    assert "@media (max-width:640px)" in css and "grid-template-columns:1fr" in css and "overflow-x:auto" in css
+    assert not re.search(r"\btd\b[^{}]*\{[^}]*overflow-wrap:anywhere", css) and 'name="viewport"' in reference_page
+
+
 def test_the_page_says_which_data_it_is_about(reference_page, reference_run):
     visible = " ".join(parse(reference_page).text)
     catalog = reference_run.state.call(1).result["datasets"][0]
@@ -275,7 +341,7 @@ def test_every_step_has_a_section_and_every_source_link_has_a_target(reference_p
     ids = set(re.findall(r'id="([^"]+)"', reference_page))
     assert {f"step-{k}" for k in STEP_KEYS} <= ids
     hrefs = set(re.findall(r'href="#([^"]+)"', reference_page))
-    assert hrefs <= ids and {f"call-{n}" for n in range(1, 13)} <= hrefs
+    assert hrefs <= ids and {f"call-{n}" for n in range(1, 14)} <= hrefs
     assert reference_page.count("<section") == 6 and reference_page.count("<h1>") == 1
 
 
@@ -289,7 +355,7 @@ def test_every_number_on_the_page_is_a_traced_value_and_call_numbers_appear_only
     assert shown_numbers(reference_page) - allowed_tokens(reference_view, reference_run.state) == set()
     p = parse(reference_page)
     calls = {str(c.seq) for c in reference_run.state.log}
-    assert p.sources and set(p.sources) <= calls and {str(n) for n in range(1, 13)} == set(p.sources)
+    assert p.sources and set(p.sources) <= calls and {str(n) for n in range(1, 14)} == set(p.sources)
 
 
 def test_a_number_that_was_not_in_the_log_would_be_caught(reference_page, reference_view, reference_run):
@@ -460,9 +526,9 @@ def test_forest_charts_draw_any_set_of_intervals(rows):
 
 # --------------------------------------------------------------------------- the command
 
-def test_the_command_writes_the_page_and_reports_the_outcome(tmp_path, capsys):
+def test_the_command_writes_the_page_and_reports_the_outcome(files, tmp_path, capsys):
     out = tmp_path / "console.html"
-    assert cli.main(["--out", str(out)]) == 0
+    assert cli.main(["--metrics", str(files[0]), "--events", str(files[1]), "--out", str(out)]) == 0
     assert "evidence strength: moderate" in capsys.readouterr().out
     page = out.read_text(encoding="utf-8")
     assert page.startswith("<!doctype html>") and "Step 6" in page and parse(page).errors == []

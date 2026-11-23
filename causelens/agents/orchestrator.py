@@ -150,6 +150,8 @@ class _Run:
         if f.events_available and s.model(point).change_detected:
             match = await self.call(DETECTIVE, "change_point", "match_event_candidates", dataset_id=ds, change_point=Prior(point.seq))
             f.match = match.seq
+        # The daily values behind the series the console draws. A description only: no later decision reads it.
+        await self.call(DETECTIVE, "change_point", "daily_series", dataset_id=ds, quality=Prior(quality.seq))
         s.stage("change_point", DETECTIVE.name, "done")
 
         decomposition = await self.call(DETECTIVE, "localize", "decompose_change", dataset_id=ds, quality=Prior(quality.seq), **self.windows)

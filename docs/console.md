@@ -19,7 +19,7 @@ integration remains unverified.** Library use: `render_html(build_view(investiga
 | Step | Shows | Evidence panel |
 |---|---|---|
 | 1 Detect | data-quality result, the change with its interval, effect size next to the noise-test p-value, what more data would be needed if it is not confirmed | |
-| 2 Locate | most plausible onset, the plausible dates, logged events whose dates coincide | **Level before and after, with the change point** |
+| 2 Locate | most plausible onset, the plausible dates, logged events whose dates coincide | **Daily conversion with the change point** |
 | 3 Localize | the localized segment and its share of the change and of traffic, FDR family, what remains unexplained | **Segment waterfall** |
 | 4 Test | each candidate: verdict at its stated lag, hypothesis, reasons, the ground it was rejected on, lag sensitivity, ambiguity, share confidence set, and the alternatives considered | |
 | 5 Estimate | differential effect with interval and sample sizes, the overall effect and lost orders, pre-trend and placebo checks, the assumptions, whether a causal claim is allowed | **Difference-in-differences chart** and **placebo chart** |
@@ -58,14 +58,20 @@ data is escaped (an event named `<img src=x onerror=...>` is shown as text).
 
 ## Limits
 
-* **No daily series.** The design asks for a series with the change point. No MCP tool returns daily values, and this task was to use
-  existing results only, so the panel shows the level of conversion in each window (with its interval) against the change point,
-  the plausible range, the candidate events and the excluded days. A true daily series would need a new tool (for example a
-  `daily_conversion` tool over the same exclusions); that is a Task 7 addition, not made here.
+* **The daily series is a description.** The series panel draws the daily values returned by the `daily_series` tool, a read-only MCP tool added
+  in Task 10 (`causelens/analytics/daily.py`; 15 tools now, 14 before). It returns, for each day with data, sessions, orders and
+  conversion (orders / sessions), with the days the data-quality check excluded marked `excluded` (their recorded counts are shown, and no
+  estimate uses them) and the dates with no rows listed as missing. It makes no decision: no other tool reads it and no statistical rule
+  changed (the 20-seed evaluation gives the same rates as before). The Detective calls it once, in the change-point stage, for the whole
+  data. Per-segment series are supported by the tool (`segment`) and not drawn.
+* The panel draws one dot per day, a line through the ordinary days (broken at an excluded day), excluded days as hollow red dots, the
+  window levels with their intervals as faint bands, the change point, the plausible range and the event dates. The highest and lowest
+  ordinary days are labelled; the axes carry no tick labels. Every dot has a tooltip with its date, conversion and counts, and every
+  chart mark has one.
 * The waterfall draws the localized partition's top 12 segments by rank and states the partition's size; contributions are the tool's
   own and are not added across partitions.
 * Display precision is fixed (for example three decimals for pp); exact values are in the tooltip. Orders and sessions are shown as
   whole numbers.
 * The page is static: no filtering, no re-running from the page. The written summaries come from whichever reasoner the run used;
   the command uses the template reasoner.
-* Not checked in other browsers or with a screen reader. Checked by screenshot in headless Chrome.
+* The layout reflows below 640 px (facts stack, tables scroll sideways, text wraps) and was checked by screenshot at that width in headless Chrome; charts shrink with the screen, so their labels are small on a phone and the tables beneath carry the numbers. Not checked in other browsers or with a screen reader.

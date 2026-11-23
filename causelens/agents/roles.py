@@ -6,7 +6,7 @@ the rules the report must follow are the file's text, not a paraphrase. The orch
 
 The design table lists the Detective's tools as four and the Scientist's as five. Two entries are added because the
 analytics need them and Task 7 exposes them: ``list_datasets`` (dataset fingerprints for the report) and
-``match_event_candidates`` (Task 3.3) for the Detective, and ``test_candidates`` (the Task 5 entry point, which runs
+``match_event_candidates`` (Task 3.3) and ``daily_series`` (the daily values the console draws; Task 10) for the Detective, and ``test_candidates`` (the Task 5 entry point, which runs
 ``test_event_scope`` for every candidate with the joint timing model) for the Scientist.
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ DETECTIVE = Role(
     stages=("validate", "confirm", "change_point", "localize"),
     tools=frozenset({
         "list_datasets", "check_data_quality", "confirm_change", "detect_change_point",
-        "match_event_candidates", "decompose_change",
+        "match_event_candidates", "decompose_change", "daily_series",
     }),
     instructions=(
         "Check the data first (a tracking break is a valid explanation), confirm the change is real, find when it started and "

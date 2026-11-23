@@ -28,6 +28,7 @@ from causelens.analytics import (
     CandidateVerdict,
     ChangePointResult,
     ConfirmChangeResult,
+    DailySeriesResult,
     DataQualityReport,
     DecompositionResult,
     DetectorParams,
@@ -43,6 +44,7 @@ from causelens.analytics import build_panel as _build_panel
 from causelens.analytics import check_data_quality as _check_data_quality
 from causelens.analytics import check_pre_trends as _check_pre_trends
 from causelens.analytics import confirm_change as _confirm_change
+from causelens.analytics import daily_series as _daily_series
 from causelens.analytics import decompose_change as _decompose_change
 from causelens.analytics import design_experiment as _design_experiment
 from causelens.analytics import detect_change_point as _detect_change_point
@@ -97,6 +99,7 @@ TOOL_NAMES: tuple[str, ...] = (
     "check_data_quality",
     "confirm_change",
     "detect_change_point",
+    "daily_series",
     "match_event_candidates",
     "decompose_change",
     "test_candidates",
@@ -231,6 +234,26 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
             detector_params=detector_params, adjust_weekdays=adjust_weekdays, min_segment_days=min_segment_days,
             plausible_level=plausible_level, alpha=alpha, min_days_for_weekday_adjustment=min_days_for_weekday_adjustment,
             max_iterations=max_iterations,
+        )
+
+    @tool
+    @_guarded
+    def daily_series(
+        dataset_id: DatasetId,
+        segment: Segment | None = None,
+        quality: QualityIn | None = None,
+        apply_exclusions: StrictBool = True,
+        detector_params: DetectorIn | None = None,
+    ) -> DailySeriesResult:
+        """Daily sessions, orders and conversion (orders / sessions), with the days the data-quality check excluded marked.
+
+        A description for plotting the series the other tools summarise, not a test. Excluded days show the counts that were recorded and
+        are marked ``excluded``; the estimating tools do not use them. Dates with no rows are listed in ``missing_dates``. Deterministic.
+        """
+        data = registry.load(dataset_id)
+        require_quality(quality, data)
+        return _daily_series(
+            data.metrics, data.events, segment=segment, quality=quality, apply_exclusions=apply_exclusions, detector_params=detector_params
         )
 
     @tool

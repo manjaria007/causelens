@@ -802,3 +802,35 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   tests` passed. 36 new tests in `tests/test_ui.py`. No analytics changed, so no calibration was rerun.
 - **Not verified:** a live hosted model (the console uses the template reasoner; `ModelReasoner` has only been run with scripted models);
   other browsers, print layout, or a screen reader; a daily series panel (see above).
+
+### Task 10 review round 1 (PR #11)
+
+- **The series panel is now a daily series (10.2).** I had substituted two window levels and said so; that did not complete the requirement.
+  New read-only tool `daily_series` (`causelens/analytics/daily.py`, the 15th MCP tool): for each day with data, sessions, orders and
+  conversion (orders / sessions), the days Task 2 excluded marked `excluded` with their recorded counts still shown, and missing dates
+  listed. A description only: no tool reads it, no decision rule changed, and the 20-seed evaluation gives identical rates (14/20 all
+  criteria; 16, 19, 18, 20, 14 by criterion). The Detective calls it once, after the change point, so it is logged (13 calls now, not 12) and
+  the console reads it from the log: 92 points, each date, count and conversion traced. The panel draws a dot per day, a line broken at
+  excluded days (hollow red dots), the window levels as faint bands, the change point, plausible range and event dates, with the highest and
+  lowest ordinary days labelled and no axis tick labels. If a run has no daily series the panel falls back to the window levels and says so.
+  Property tests (`tests/test_daily_series.py`): points are the days with data in date order and gaps are listed; conversion is exactly
+  orders / sessions and totals are preserved; row order is irrelevant; a segment is the sum of its rows; excluded days keep their counts;
+  agreement with `confirm_change` on the windows (days, sessions, orders and the pooled rate).
+- Because the tool list changed: `TOOL_NAMES`, the Detective's tools, the Kiro example configs' `autoApprove`, `docs/mcp-server.md`
+  (the historical "14 tools" Kiro CLI verification is kept and marked as predating the 15th tool; it has not been re-checked from Kiro),
+  `docs/agents.md`, `docs/console.md`, and the call numbers hard-coded in several agents and UI tests.
+- **Clean-checkout failure fixed.** The console command test relied on the ignored `data/metrics_daily.csv`; it now passes the `files`
+  fixture's `--metrics` and `--events`. To check the class of problem rather than the one test, I ran the whole suite with
+  `data/metrics_daily.csv` moved away (1,327 passed), then restored it.
+- **Presentation items.** I could not read the PR notes (the API returned nothing for the PR's comments), so I fixed what you named and
+  checked it myself: below 640 px the facts stack, tables scroll sideways and text wraps (checked by screenshot at 500 px, the narrowest
+  headless Chrome would render; at that width nothing overflowed). My first rule `overflow-wrap:anywhere` on table cells broke words
+  mid-word ("device=mo bile"); removed. Every chart mark (day dots, bands, markers, waterfall bars and labels, forest rows) now has a
+  tooltip, and a test checks that no circle, rect or path lacks one. If your list has other items, tell me which.
+- Mutation checks on the new code (14): excluded days not marked, counts blanked, conversion rounded, segment ignored, exclusions flag
+  ignored, missing dates dropped, line not broken at an excluded day, min and max swapped, source link dropped, excluded drawn as ordinary,
+  wrong field, daily call omitted, mobile CSS dropped, tooltips dropped. All caught.
+- Results: `.venv/bin/python -m pytest -q`: 1,327 passed (217 s), once after the last code change and with the ignored CSV absent;
+  `.venv/bin/python -m ruff check causelens tests` passed.
+- Not verified: a live hosted model; other browsers, print layout, a screen reader; `daily_series` from inside Kiro (the tool list there
+  has not been refreshed); per-segment daily series are supported by the tool but not drawn.

@@ -14,12 +14,23 @@ NO_CHANGE = "no change"
 STEP_NOT_RUN = "This step did not run: the investigation stopped earlier or could not reach it."
 NO_CANDIDATES_TESTED = "No candidate explanation was tested."
 
-TIMELINE_TITLE = "Level of conversion before and after, with the change point"
+TIMELINE_TITLE = "Daily conversion with the change point"
 PLAUSIBLE_RANGE = "Dates the data cannot rule out as the onset"
 EXCLUDED_DAY = "Excluded day"
 TIMELINE_LEGEND = (
-    "The shaded span is the plausible onset range, the dashed line the most plausible onset, red ticks are days excluded as possible "
-    "tracking issues, and lettered triangles are the dates of logged events. Bands show each window's level with its interval."
+    "Each dot is one day's conversion (orders divided by sessions) as the daily_series tool returned it. Hollow red dots are days excluded as "
+    "possible tracking issues: they show what was recorded and no estimate uses them. The shaded span is the plausible onset range, the "
+    "dashed line the most plausible onset, lettered triangles are the dates of logged events, and the grey and blue bands are each window's "
+    "level with its interval. The highest and lowest ordinary days are labelled."
+)
+TIMELINE_LEGEND_WINDOWS = (
+    "The shaded span is the plausible onset range, the dashed line the most plausible onset, red ticks are days excluded as possible tracking "
+    "issues, and lettered triangles are the dates of logged events. Bands show each window's level with its interval."
+)
+DAILY_VALUES_FROM = "Daily values were read from tool call"
+NO_DAILY_VALUES = (
+    "The daily_series tool was not called in this run, so only the level of conversion in each window (with its interval) is drawn, not "
+    "a daily series."
 )
 WATERFALL_TITLE = "Where the change is concentrated"
 WATERFALL_DESC = "Each bar is one segment's contribution to the overall change, stacked in rank order, for the partition"

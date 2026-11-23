@@ -54,6 +54,9 @@ table{border-collapse:collapse;width:100%;font-size:.92rem;margin:.4rem 0}th,td{
 th{color:var(--mute);font-weight:600}svg{max-width:100%;height:auto;display:block;margin:.4rem 0}svg text{font:12px system-ui,sans-serif;fill:var(--ink)}
 svg .axis{stroke:#8b94a3;stroke-width:1}svg .zero{stroke:var(--ink);stroke-dasharray:4 3;stroke-width:1}
 ul.plain{margin:.3rem 0;padding-left:1.2rem}details{margin:.4rem 0}summary{cursor:pointer}
+code,dd,li,blockquote,p{overflow-wrap:anywhere}
+@media (max-width:640px){header,main,footer{padding:10px 12px}section.step{padding:12px}dl.facts{grid-template-columns:1fr;gap:0}
+dl.facts dd{margin-bottom:.5rem}table{display:block;overflow-x:auto;max-width:100%}h1{font-size:1.25rem}nav ol{gap:6px}}
 """
 
 
@@ -121,6 +124,7 @@ def _scale(lo: float, hi: float, width: float, left: float):
 def timeline_svg(p: TimelinePanel) -> str:
     dates = [d for d in (p.first, p.last, p.best_date, *p.plausible, *p.excluded) if d is not None]
     dates += [x for ev in p.events for x in (ev.event_date, ev.onset_date)]
+    dates += [pt.date for pt in p.points]
     for band in (p.pre, p.post):
         if band:
             dates += [band.start, band.end]
@@ -128,33 +132,71 @@ def timeline_svg(p: TimelinePanel) -> str:
         return ""
     lo, hi = min(_ord(d) for d in dates), max(_ord(d) for d in dates) + 1
     x = _scale(lo, hi, W - 40, 20)
-    top, bottom = 24, 150
+    top, bottom = 34, 190
     levels = [b.level for b in (p.pre, p.post) if b and b.level]
+    daily = [pt for pt in p.points if pt.conversion is not None]
+    values = [float(pt.conversion.value) for pt in daily if pt.conversion is not None]  # type: ignore[arg-type]
+    values += [v for i in levels for v in (i.lower, i.upper)]
     parts = [f'<line class="axis" x1="20" y1="{bottom}" x2="{W - 20}" y2="{bottom}"/>']
-    if levels:
-        vmin, vmax = min(i.lower for i in levels), max(i.upper for i in levels)
-        pad = (vmax - vmin) * 0.25 or 1.0
+    y = None
+    if values:
+        vmin, vmax = min(values), max(values)
+        pad = (vmax - vmin) * 0.12 or 1.0
         y = _scale(vmin - pad, vmax + pad, -(bottom - top), bottom)  # larger values higher up
     if len(p.plausible) == 2:
         a, b = x(_ord(p.plausible[0])), x(_ord(p.plausible[1]) + 1)
         parts.append(f'<rect x="{a:.1f}" y="{top}" width="{max(b - a, 2):.1f}" height="{bottom - top}" fill="#f4d9a8" opacity=".6"><title>{e(wording.PLAUSIBLE_RANGE)}</title></rect>')
     for band, colour in ((p.pre, "#6b7a90"), (p.post, "#1b5fa8")):
-        if band is None or band.level is None:
+        if band is None or band.level is None or y is None:
             continue
         a, b = x(_ord(band.start)), x(_ord(band.end) + 1)
         lv = band.level
-        parts.append(f'<rect x="{a:.1f}" y="{y(lv.upper):.1f}" width="{b - a:.1f}" height="{max(y(lv.lower) - y(lv.upper), 1):.1f}" fill="{colour}" opacity=".25"/>')
-        parts.append(f'<line x1="{a:.1f}" x2="{b:.1f}" y1="{y(lv.estimate):.1f}" y2="{y(lv.estimate):.1f}" stroke="{colour}" stroke-width="3"/>')
-        est = fmt_bounds(lv)[0]
-        parts.append(f'<text x="{(a + b) / 2:.1f}" y="{y(lv.upper) - 6:.1f}" text-anchor="middle">{e(band.label)}: {e(est)}</text>')
+        est, lo_b, hi_b, level = fmt_bounds(lv)
+        parts.append(f'<rect x="{a:.1f}" y="{y(lv.upper):.1f}" width="{b - a:.1f}" height="{max(y(lv.lower) - y(lv.upper), 1):.1f}" fill="{colour}" opacity=".18">'
+                     f"<title>{e(band.label)} window: {e(est)} ({e(level)} interval {e(lo_b)} to {e(hi_b)})</title></rect>")
+        parts.append(f'<line x1="{a:.1f}" x2="{b:.1f}" y1="{y(lv.estimate):.1f}" y2="{y(lv.estimate):.1f}" stroke="{colour}" stroke-width="2" stroke-dasharray="6 3">'
+                     f"<title>{e(band.label)} window level {e(est)}</title></line>")
+    if y is not None and daily:
+        run: list[str] = []
+        for pt in p.points:
+            if pt.conversion is None or pt.status.value != "ok":
+                if len(run) > 1:
+                    parts.append(f'<polyline points="{" ".join(run)}" fill="none" stroke="#1d2330" stroke-width="1.2" opacity=".6"/>')
+                run = []
+                continue
+            run.append(f"{x(_ord(pt.date) + 0.5):.1f},{y(float(pt.conversion.value)):.1f}")  # type: ignore[arg-type]
+        if len(run) > 1:
+            parts.append(f'<polyline points="{" ".join(run)}" fill="none" stroke="#1d2330" stroke-width="1.2" opacity=".6"/>')
+        for pt in p.points:
+            if pt.conversion is None:
+                continue
+            cx, cy = x(_ord(pt.date) + 0.5), y(float(pt.conversion.value))  # type: ignore[arg-type]
+            tip = (f"{fmt_traced(pt.date)}: {fmt_traced(pt.conversion)} ({fmt_traced(pt.orders)} orders of {fmt_traced(pt.sessions)} sessions), "
+                   f"{'excluded day' if pt.status.value == 'excluded' else 'ordinary day'}")
+            if pt.status.value == "excluded":
+                parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4.5" fill="#fff" stroke="#b3261e" stroke-width="2"><title>{e(tip)}</title></circle>')
+            else:
+                parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="2.4" fill="#1d2330"><title>{e(tip)}</title></circle>')
+        ordinary = [pt for pt in daily if pt.status.value == "ok"]
+        if ordinary:
+            for pt, anchor, dy in ((max(ordinary, key=lambda q: float(q.conversion.value)), "middle", -8),  # type: ignore[union-attr, arg-type]
+                                   (min(ordinary, key=lambda q: float(q.conversion.value)), "middle", 16)):  # type: ignore[union-attr, arg-type]
+                parts.append(f'<text x="{x(_ord(pt.date) + 0.5):.1f}" y="{y(float(pt.conversion.value)) + dy:.1f}" text-anchor="{anchor}">'  # type: ignore[union-attr, arg-type]
+                             f"{e(fmt_traced(pt.conversion))} on {e(fmt_traced(pt.date))}</text>")  # type: ignore[arg-type]
+    elif y is not None:
+        for band in (p.pre, p.post):
+            if band and band.level:
+                parts.append(f'<text x="{(x(_ord(band.start)) + x(_ord(band.end) + 1)) / 2:.1f}" y="{y(band.level.upper) - 6:.1f}" text-anchor="middle">'
+                             f"{e(band.label)}: {e(fmt_bounds(band.level)[0])}</text>")
     if p.best_date is not None:
         bx = x(_ord(p.best_date) + 0.5)
-        parts.append(f'<line x1="{bx:.1f}" x2="{bx:.1f}" y1="{top - 8}" y2="{bottom}" stroke="#b3261e" stroke-width="2" stroke-dasharray="5 3"/>')
-        parts.append(f'<text x="{bx:.1f}" y="{top - 12}" text-anchor="middle" fill="#b3261e">change point {e(fmt_traced(p.best_date))}</text>')
+        parts.append(f'<line x1="{bx:.1f}" x2="{bx:.1f}" y1="{top - 8}" y2="{bottom}" stroke="#b3261e" stroke-width="2" stroke-dasharray="5 3"><title>change point {e(fmt_traced(p.best_date))}</title></line>')
+        parts.append(f'<text x="{bx:.1f}" y="{top - 14}" text-anchor="middle" fill="#b3261e">change point {e(fmt_traced(p.best_date))}</text>')
     for k, ev in enumerate(p.events):
         ex = x(_ord(ev.event_date) + 0.5)
         mark = chr(ord("A") + k)
-        parts.append(f'<path d="M{ex - 5:.1f} {bottom + 16} L{ex + 5:.1f} {bottom + 16} L{ex:.1f} {bottom + 5} Z" fill="#555"/>')
+        parts.append(f'<path d="M{ex - 5:.1f} {bottom + 16} L{ex + 5:.1f} {bottom + 16} L{ex:.1f} {bottom + 5} Z" fill="#555">'
+                     f"<title>{mark}: {e(fmt_traced(ev.name))}, {e(fmt_traced(ev.event_date))}, {e(fmt_traced(ev.verdict))}</title></path>")
         parts.append(f'<text x="{ex:.1f}" y="{bottom + 30}" text-anchor="middle">{mark}</text>')
     for d in p.excluded:
         dx = x(_ord(d) + 0.5)
@@ -184,12 +226,15 @@ def waterfall_svg(p: WaterfallPanel) -> str:
         yy = 8 + k * row_h
         colour = "#b3261e" if float(r.contribution.value) < 0 else "#1b5fa8"  # type: ignore[arg-type]
         stroke = ' stroke="#1d2330" stroke-width="2"' if r.localized else ""
-        parts.append(f'<text x="{left}" y="{yy + 14}">{e(fmt_traced(r.label))}{" (localized)" if r.localized else ""}</text>')
-        parts.append(f'<rect x="{min(x(a), x(b)):.1f}" y="{yy}" width="{max(abs(x(b) - x(a)), 1.5):.1f}" height="{row_h - 8}" fill="{colour}"{stroke}/>')
+        tip = (f"{fmt_traced(r.label)}: contribution {fmt_traced(r.contribution)}, rate effect {fmt_traced(r.rate_effect)}, "
+               f"mix effect {fmt_traced(r.mix_effect)}" + (f", FDR-adjusted q {fmt_traced(r.q_value)}" if r.q_value else ""))
+        parts.append(f'<text x="{left}" y="{yy + 14}">{e(fmt_traced(r.label))}{" (localized)" if r.localized else ""}<title>{e(tip)}</title></text>')
+        parts.append(f'<rect x="{min(x(a), x(b)):.1f}" y="{yy}" width="{max(abs(x(b) - x(a)), 1.5):.1f}" height="{row_h - 8}" fill="{colour}"{stroke}><title>{e(tip)}</title></rect>')
         parts.append(f'<text x="{max(x(a), x(b)) + 6:.1f}" y="{yy + 14}">{e(fmt_traced(r.contribution))}</text>')
     yy = 8 + len(bars) * row_h
     parts.append(f'<text x="{left}" y="{yy + 14}" font-weight="600">Overall change</text>')
-    parts.append(f'<rect x="{min(x(0), x(total)):.1f}" y="{yy}" width="{max(abs(x(total) - x(0)), 1.5):.1f}" height="{row_h - 8}" fill="none" stroke="#1d2330" stroke-width="2"/>')
+    parts.append(f'<rect x="{min(x(0), x(total)):.1f}" y="{yy}" width="{max(abs(x(total) - x(0)), 1.5):.1f}" height="{row_h - 8}" fill="none" stroke="#1d2330" stroke-width="2">'
+                 f"<title>Overall change {e(fmt_traced(p.overall_change))}</title></rect>")
     parts.append(f'<text x="{max(x(0), x(total)) + 6:.1f}" y="{yy + 14}" font-weight="600">{e(fmt_traced(p.overall_change))}</text>')
     return (f'<svg viewBox="0 0 {W} {height}" role="img" aria-labelledby="wf-t wf-d"><title id="wf-t">{e(wording.WATERFALL_TITLE)}</title>'
             f'<desc id="wf-d">{e(wording.WATERFALL_DESC)} {e(fmt_traced(p.partition))}.</desc>{"".join(parts)}</svg>')
@@ -209,9 +254,10 @@ def forest_svg(rows: list[tuple[str, TracedInterval]], uid: str, title: str) -> 
     for k, (label, i) in enumerate(rows):
         yy = 18 + k * row_h
         est, lo, hi, level = fmt_bounds(i)
-        parts.append(f'<text x="{left}" y="{yy + 4}">{e(label)}</text>')
-        parts.append(f'<line x1="{x(i.lower):.1f}" x2="{x(i.upper):.1f}" y1="{yy}" y2="{yy}" stroke="#1d2330" stroke-width="2"/>')
-        parts.append(f'<circle cx="{x(i.estimate):.1f}" cy="{yy}" r="5" fill="#1b5fa8"/>')
+        tip = f"{label}: {est}, {level} interval {lo} to {hi}"
+        parts.append(f'<text x="{left}" y="{yy + 4}">{e(label)}<title>{e(tip)}</title></text>')
+        parts.append(f'<line x1="{x(i.lower):.1f}" x2="{x(i.upper):.1f}" y1="{yy}" y2="{yy}" stroke="#1d2330" stroke-width="2"><title>{e(tip)}</title></line>')
+        parts.append(f'<circle cx="{x(i.estimate):.1f}" cy="{yy}" r="5" fill="#1b5fa8"><title>{e(tip)}</title></circle>')
         parts.append(f'<text x="{x(i.upper) + 10:.1f}" y="{yy + 4}">{e(est)} [{e(lo)}, {e(hi)}]</text>')
         desc.append(f"{label} {est}, {level} interval {lo} to {hi}")
     return (f'<svg viewBox="0 0 {W} {height}" role="img" aria-labelledby="{uid}-t {uid}-d"><title id="{uid}-t">{e(title)}</title>'
@@ -222,6 +268,8 @@ def forest_svg(rows: list[tuple[str, TracedInterval]], uid: str, title: str) -> 
 
 def timeline_html(p: TimelinePanel) -> str:
     out = [f"<h3>{e(wording.TIMELINE_TITLE)}</h3>", timeline_svg(p)]
+    if p.points:
+        out.append(f'<p class="mute">{e(wording.DAILY_VALUES_FROM)}{src(p.points[0].date.call)}</p>')
     if p.events:
         rows = "".join(
             f"<tr><td>{chr(ord('A') + k)}</td><td>{num(ev.name)}</td><td>{num(ev.event_date)}</td><td>{num(ev.onset_date)}</td><td>{chip('v', str(ev.verdict.value))}</td></tr>"
@@ -230,7 +278,7 @@ def timeline_html(p: TimelinePanel) -> str:
     bands = "".join(f"<li>{e(b.label)} window {num(b.start)} to {num(b.end)}: {item_html(b.level)}</li>" for b in (p.pre, p.post) if b and b.level)
     if bands:
         out.append(f'<ul class="plain">{bands}</ul>')
-    out.append(f'<p class="caveat">{e(p.caveat)} {e(wording.TIMELINE_LEGEND)}</p>')
+    out.append(f'<p class="caveat">{e(p.caveat)} {e(wording.TIMELINE_LEGEND if p.points else wording.TIMELINE_LEGEND_WINDOWS)}</p>')
     return "".join(out)
 
 

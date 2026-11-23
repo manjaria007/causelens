@@ -7,8 +7,8 @@ from the log (``verify_traces``). Nothing here computes a statistic; the only ar
 Six steps (design: detect, locate, localize, test, estimate, recommend) map onto the orchestrator's seven stages:
 ``detect`` is validate plus confirm, because a tracking break has to be ruled out before a change is believed.
 
-No MCP tool returns a daily series, so the "series" panel shows the level of conversion in the two windows (from ``confirm_change``)
-against the change point, the candidate events and the excluded days. A daily series would need a new tool.
+The "series" panel draws the daily conversion returned by the ``daily_series`` tool (a description added in Task 10; no decision reads
+it) with the window levels from ``confirm_change``, the change point, the candidate events and the excluded days.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from causelens.agents.trace import (
     Tracer,
     verify_traces,
 )
+from causelens.ui import wording
 
 STEP_KEYS = ("detect", "locate", "localize", "test", "estimate", "recommend")
 STEP_STAGES: dict[str, tuple[str, ...]] = {
@@ -81,7 +82,18 @@ class EventMark(_V):
     verdict: Traced
 
 
+class SeriesPoint(_V):
+    """One day of the series, as the ``daily_series`` tool returned it."""
+
+    date: Traced
+    sessions: Traced
+    orders: Traced
+    conversion: Traced | None
+    status: Traced
+
+
 class TimelinePanel(_V):
+    points: list[SeriesPoint] = Field(default_factory=list, description="Daily values from the daily_series tool; empty when it was not called.")
     first: Traced | None
     last: Traced | None
     pre: WindowBand | None
@@ -201,6 +213,22 @@ def _stage_status(result: InvestigationResult, key: str) -> tuple[StepStatus, li
     return "done", notes, calls
 
 
+def _series_points(t: Tracer) -> list[SeriesPoint]:
+    call = t.state.last("daily_series")
+    if call is None or call.result is None or call.result.get("status") != "ok":
+        return []
+    c = call.seq
+    return [
+        SeriesPoint(
+            date=t.value(c, f"/points/{i}/date", "day", "date"), sessions=t.value(c, f"/points/{i}/sessions", "sessions that day", "sessions"),
+            orders=t.value(c, f"/points/{i}/orders", "orders that day", "orders"),
+            conversion=t.maybe(c, f"/points/{i}/conversion", "conversion that day", "fraction"),
+            status=t.value(c, f"/points/{i}/status", "day status", "text"),
+        )
+        for i in range(len(call.result["points"]))
+    ]
+
+
 def _timeline(t: Tracer, result: InvestigationResult) -> TimelinePanel:
     confirm = result.confirmed_change
     bands: dict[str, WindowBand | None] = {"pre": None, "post": None}
@@ -212,14 +240,14 @@ def _timeline(t: Tracer, result: InvestigationResult) -> TimelinePanel:
                 start=t.value(c, f"/{key}/start", f"{key} window start", "date"), end=t.value(c, f"/{key}/end", f"{key} window end", "date"),
             )
     point = result.change_point
+    points = _series_points(t)
     return TimelinePanel(
-        first=result.dataset.first_date if result.dataset else None, last=result.dataset.last_date if result.dataset else None,
+        points=points, first=result.dataset.first_date if result.dataset else None, last=result.dataset.last_date if result.dataset else None,
         pre=bands["pre"], post=bands["post"], best_date=point.best_date if point else None,
         plausible=[point.plausible_dates[0], point.plausible_dates[-1]] if point and point.plausible_dates else [],
         events=[EventMark(name=c.event, event_date=c.event_date, onset_date=c.onset_date, verdict=c.verdict) for c in result.candidates],
         excluded=list(result.data_quality.excluded_dates) if result.data_quality else [],
-        caveat="No MCP tool returns daily values, so this shows the level of conversion in each window (with its interval), not a daily series. "
-               "Dates are those the tools returned.",
+        caveat="" if points else wording.NO_DAILY_VALUES,
     )
 
 
