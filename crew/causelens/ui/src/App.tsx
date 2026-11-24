@@ -10,6 +10,7 @@ import {
   STATIC_LABEL,
   agentFor,
   consoleStateFrom,
+  embedForSrcdoc,
   slotKeyFor,
   type AgentKey,
   type ConsoleState,
@@ -82,11 +83,11 @@ function ReferenceConsole() {
       </p>
       {state.kind === 'missing' && <EmptyState icon={<FileWarning size={20} />} title="Reference console unavailable" subtitle={state.detail} />}
       {state.kind === 'ready' && (
-        // sandbox="" : no scripts, no same-origin access, no top navigation. The console's own source links are in-page anchors (#call-N),
-        // which still work inside the frame.
+        // sandbox="" : no scripts, no same-origin access, no top navigation. The console's in-page links are rewritten to
+        // about:srcdoc#... so a click scrolls within this frame instead of navigating it to the parent page's URL.
         <iframe
           title={`CauseLens reference console (${STATIC_LABEL.toLowerCase()})`}
-          srcDoc={state.html}
+          srcDoc={embedForSrcdoc(state.html)}
           sandbox=""
           referrerPolicy="no-referrer"
           style={{ width: '100%', height: '70vh', border: '1px solid var(--border, #d5dae3)', borderRadius: 8 }}

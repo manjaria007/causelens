@@ -1,30 +1,8 @@
-// Renders the BUILT page (dist/index.mjs) with react-dom/server against the TEST STUBS in test/stubs/. This checks what the page asks the
-// host to do and what it says; it is not a Crew session and proves nothing about native execution.
+// Renders the BUILT page against the TEST STUBS (see render.mjs). Checks what the page asks the host for and what it says; it is not a
+// Crew session and proves nothing about native execution.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-
-const here = dirname(fileURLToPath(import.meta.url))
-const ui = join(here, '..')
-const built = readFileSync(join(ui, 'dist', 'index.mjs'), 'utf8')
-const stub = (name) => pathToFileURL(join(here, 'stubs', name)).href
-const rewired = built
-  .replaceAll('"@kirocrew/app-sdk/ui"', JSON.stringify(stub('app-sdk-ui.mjs')))
-  .replaceAll('"@kirocrew/app-sdk"', JSON.stringify(stub('app-sdk.mjs')))
-  .replaceAll('"lucide-react"', JSON.stringify(stub('lucide-react.mjs')))
-const tmp = mkdtempSync(join(ui, 'node_modules', '.page-test-'))  // removed by the cleanup below
-process.on('exit', () => rmSync(tmp, { recursive: true, force: true }))  // inside the ui tree so 'react' resolves from node_modules
-const file = join(tmp, 'page.mjs')
-writeFileSync(file, rewired)
-
-const React = await import('react')
-const { renderToStaticMarkup } = await import('react-dom/server')
-const { default: Page } = await import(pathToFileURL(file).href)
-const { calls } = await import(stub('app-sdk.mjs'))
-const html = renderToStaticMarkup(React.createElement(Page))
-const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+import { built, calls, html, text, frame, packagedConsole } from './render.mjs'
 
 test('the built bundle imports only the host SDK, react and lucide', () => {
   const specifiers = [...built.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]).sort()
@@ -48,22 +26,22 @@ test('the page mounts a native ChatEmbed for the selected agent, defaulting to t
 test('the static console is labelled and shown from the bundle through a sandboxed srcDoc iframe', () => {
   assert.match(text, /Static reference result\./)
   assert.match(text, /not the output of a native Crew agent or of a hosted model/)
-  const frames = [...html.matchAll(/<iframe([^>]*)>/g)].map((m) => m[1])
-  assert.equal(frames.length, 1)
-  assert.match(frames[0], /sandbox=""/)
-  assert.ok(!/\ssrc=/.test(frames[0]), 'no src URL')
-  const srcdoc = frames[0].match(/srcDoc="([^"]*)"/i)[1]
-    .replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&')
-  assert.equal(srcdoc, readFileSync(join(ui, 'console.html'), 'utf8'), 'the frame holds the packaged console unchanged')
+  const { attrs, srcdoc } = frame()
+  assert.match(attrs, /sandbox=""/)
+  assert.ok(!/\ssrc=/.test(attrs), 'no src URL')
+  // the frame holds the packaged console, with only its in-page links made srcdoc-local
+  assert.equal(srcdoc.replaceAll('href="about:srcdoc#', 'href="#'), packagedConsole)
+  assert.ok(!/href="#/.test(srcdoc), 'no bare fragment link is left in the frame')
 })
 
-test('the bundled console keeps its provenance links', () => {
-  const consoleHtml = readFileSync(join(ui, 'console.html'), 'utf8')
-  const links = new Set([...consoleHtml.matchAll(/href="#(call-\d+)"/g)].map((m) => m[1]))
-  const targets = new Set([...consoleHtml.matchAll(/id="(call-\d+)"/g)].map((m) => m[1]))
-  assert.ok(links.size >= 10, 'source links present')
-  for (const l of links) assert.ok(targets.has(l), `link #${l} has a target`)
-  assert.ok(!/<script/i.test(consoleHtml), 'no script in the console')
+test('the in-page links of the embedded console are srcdoc-local and each has its target', () => {
+  const { srcdoc } = frame()
+  const links = [...srcdoc.matchAll(/href="about:srcdoc#([\w-]+)"/g)].map((m) => m[1])
+  const ids = new Set([...srcdoc.matchAll(/id="([\w-]+)"/g)].map((m) => m[1]))
+  assert.ok(links.filter((l) => l.startsWith('call-')).length >= 100 && links.some((l) => l.startsWith('step-')))
+  for (const l of new Set(links)) assert.ok(ids.has(l), `#${l} has a target`)
+  assert.ok(!/<script/i.test(srcdoc), 'no script in the console')
+  assert.ok(/href="#call-\d+"/.test(packagedConsole), 'the packaged console itself keeps its canonical links')
 })
 
 test('the page states no finding of its own', () => {

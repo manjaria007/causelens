@@ -1035,3 +1035,25 @@ not perform are listed under "Not done" in the final block.
 - Focused checks: `npm run build` (after `npm ci --legacy-peer-deps`); UI tests 8 passed (stubs, not Crew); `tests/test_crew_app.py` 26 passed, including the
   rebuild-equals-committed-bundle check; Ruff on `causelens tests scripts crew` passed; `package_crew_app.py --check` up to date.
 - Native Crew verification remains pending (Task 4 install and the owner's per-app trust prompt).
+
+### Console fragment links inside the embedded view (PR #13)
+
+- **Finding.** Inside the sandboxed `srcDoc` frame, the console's in-page links (`href="#call-N"` source links and the six `href="#step-..."` step links) resolve
+  against the parent page's URL, because an `about:srcdoc` document takes its parent's URL as its base. I confirmed it in a real browser before the fix (the
+  control test below): clicking a bare `#call-8` loaded the parent page (`http://127.0.0.1:<port>/control#call-8`, title "parent") into the frame, with a new
+  request for `/control`, and the console was gone.
+- **Fix.** `embedForSrcdoc` in `ui/src/model.ts` rewrites `href="#X"` to `href="about:srcdoc#X"` in the copy handed to `srcDoc`. The packaged
+  `ui/console.html` (and `docs/demo/index.html`) keep their canonical `#call-N` links; `sandbox=""` is unchanged. Rebuilt: `dist/index.mjs` 130.60 kB.
+- **Browser regression** (`ui/test/browser.test.mjs`): headless Chrome (the installed Google Chrome) driven over the DevTools protocol. The parent page is
+  served over HTTP from 127.0.0.1 and holds the iframe markup the built page renders with the test stubs (not the Crew dashboard). The sandboxed frame runs out of
+  process, so it is attached as its own target and read in an isolated world. The test picks a visible, clickable source link whose target is out of view
+  and clicks it with real mouse events. Observed: link `about:srcdoc#call-8`; frame `scrollY` 0 -> 9849; the target's top 10068 -> 219 within a 569 px frame
+  (in view; it cannot reach the top because it is near the end); frame URL `about:srcdoc#call-8`, title still "CauseLens investigation"; no
+  `Network.requestWillBeSent` after the click; the server saw only `/page` (and the browser's own `/favicon.ico`). A control with the unrewritten console
+  asserts the failure above. One caveat: links inside a closed `<details>` are laid out but not hit by clicks, so the test skips them when choosing a link.
+- **Flakiness I hit and what I changed.** Three runs hung until the caller's timeout (twice from a Python wrapper, once under pytest) before I added bounds; I did
+  not identify the cause. The test now bounds every DevTools wait, starts Chrome in its own process group and kills the group, and closes all server
+  connections before closing the server. After that: 8 consecutive direct runs, 4 more, and 3 pytest runs all passed in about 3.4 s each, with no leftover
+  Chrome processes. The pytest wrapper now reports partial output if the Node tests ever exceed 150 s.
+- Focused checks: UI tests 10 passed (8 stub/unit, 2 browser); `tests/test_crew_app.py` 26 passed (three runs); Ruff on `causelens tests scripts crew` passed;
+  `package_crew_app.py --check` up to date. Native Crew verification (the page and its links inside the Crew dashboard) is still pending Task 4.

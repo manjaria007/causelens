@@ -64,6 +64,17 @@ export function consoleStateFrom(html: string | null | undefined): ConsoleState 
   return { kind: 'ready', html }
 }
 
+/**
+ * The console's in-page links (`href="#call-N"` source links and `href="#step-..."` step links) for display inside a `srcDoc` frame.
+ *
+ * An `about:srcdoc` document takes the parent page's URL as its base, so a bare `#call-N` resolves to `<parent URL>#call-N` and clicking it
+ * navigates the frame away to the parent page (a new request, and the console is lost). `about:srcdoc#call-N` is the same document's own
+ * fragment, so the click only scrolls. The packaged console file itself is not changed; only the copy handed to `srcDoc` is.
+ */
+export function embedForSrcdoc(html: string): string {
+  return html.replace(/href="#([A-Za-z][\w-]*)"/g, 'href="about:srcdoc#$1"')
+}
+
 export const STATIC_LABEL = 'Static reference result'
 export const STATIC_EXPLANATION =
   "This console was written by the repository's template reasoner from the reference dataset's logged tool results. It is not the output of a native Crew agent or of a hosted model, and it does not update when the agents run."

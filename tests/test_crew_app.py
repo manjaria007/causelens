@@ -253,7 +253,7 @@ def test_the_page_labels_the_static_console_and_does_not_present_it_as_agent_out
     model = (APP / "ui" / "src" / "model.ts").read_text()
     page = (APP / "ui" / "src" / "App.tsx").read_text()
     assert "Static reference result" in model and "not the output of a native Crew agent" in model
-    assert "import consoleHtml from '../console.html?raw'" in page and "srcDoc={state.html}" in page and 'sandbox=""' in page
+    assert "import consoleHtml from '../console.html?raw'" in page and "srcDoc={embedForSrcdoc(state.html)}" in page and 'sandbox=""' in page
     assert "/apps/causelens/ui/console.html" not in model + page  # Crew 0.13.1's asset route answers 403 for .html
     assert "STATIC_LABEL" in page
     for source in (model, page):
@@ -293,11 +293,19 @@ NODE = shutil.which("node")
 def test_the_ui_node_tests_pass():
     """Runs crew/causelens/ui/test/: unit tests of src/model.ts and a render of the BUILT page against stub host modules (test/stubs/).
     The stubs record what the page asks the host for; nothing here runs Crew, an agent or MCP."""
-    files = ["test/model.test.mjs", "test/page.test.mjs"]  # explicit names: Node 24 does not expand a directory argument to --test
+    # explicit names: Node 24 does not expand a directory argument to --test. browser.test.mjs drives real headless Chrome over an HTTP
+    # parent page (still with the stub host, not Crew); it skips itself when no Chrome/Chromium is installed.
+    files = ["test/model.test.mjs", "test/page.test.mjs", "test/browser.test.mjs"]
     assert json.loads((APP / "ui" / "package.json").read_text())["scripts"]["test"] == "node --test " + " ".join(files)
-    out = subprocess.run([NODE, "--test", *files], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=120)
+    try:
+        out = subprocess.run([NODE, "--test", *files], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=150)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        pytest.fail(f"the UI tests did not finish in 150 s; output so far:\n{partial[-4000:]}")
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
-    assert re.search(r"\bpass 8\b", out.stdout) and re.search(r"\bfail 0\b", out.stdout)
+    passed = int(re.search(r"\bpass (\d+)", out.stdout).group(1))
+    skipped = int(re.search(r"\bskipped (\d+)", out.stdout).group(1))
+    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 10 and passed >= 8
 
 
 def test_the_built_bundle_is_current_with_its_source():
