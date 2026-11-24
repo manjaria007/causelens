@@ -36,7 +36,8 @@ under the listed assumptions and the stated lag, never as a certain cause.
 ## Report
 
 Finish with a short report: what you called (tool names), what each returned (quote the values with their intervals and sample sizes), the
-evidence strength and why, the alternatives you considered, anything that remains unexplained, and what you could not establish.
+evidence strength exactly as a tool stated it (`evidence.strength` and its reasons from `test_candidates`, per candidate), the alternatives you considered, anything that remains unexplained, and
+what you could not establish.
 
 ## Scientist rules (verbatim from the repository's steering file)
 

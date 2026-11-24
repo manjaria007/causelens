@@ -34,6 +34,7 @@ __all__ = [
     "StrictFloat",
     "StrictInt",
     "strictly",
+    "strictly_restoring",
 ]
 
 M = TypeVar("M", bound=BaseModel)
@@ -123,3 +124,46 @@ DatasetId = Annotated[str, Field(description="Id of a configured dataset. Call l
 PreWindow = Annotated[DateWindow, Field(description="The baseline window (before the change), inclusive dates.")]
 PostWindow = Annotated[DateWindow, Field(description="The window after the change, inclusive dates.")]
 AlphaLevel = Annotated[StrictFloat, Field(description="Probability in (0, 1).")]
+
+
+# --------------------------------------------------------------------------- match_event_candidates: known omissions in a copied change point
+
+#: The empty containers of a ``ChangePointResult`` that a native Crew agent's tool call was observed to drop when it copied the result into
+#: ``match_event_candidates`` (PR #13; ``docs/crew-evidence/slot-causelens-detective.json``). Each is restored ONLY when its key is absent.
+CHANGE_POINT_RESTORABLE: tuple[tuple[tuple[str, ...], object], ...] = (
+    (("segment",), {}),
+    (("exclusions", "missing_dates"), []),
+    (("exclusions", "truncated_baseline_dates"), []),
+)
+
+
+def restore_known_change_point_omissions(value: object) -> object:
+    """Put back the three known empty containers when (and only when) their keys are absent; change nothing else.
+
+    A supplied value is kept as it is, so a wrong type or an explicit ``null`` is still refused by the strict validation that follows, and a
+    missing core field (``status``, ``plausible_dates``, ...) is still an error. ``exclusions`` itself is not invented: the two list fields are
+    restored only inside an ``exclusions`` object that is present. This is not provenance: a change point is not recomputed by
+    ``match_event_candidates``, so a copied result that was edited (rather than shortened) is used as given.
+    """
+    if not isinstance(value, dict):
+        return value
+    out = dict(value)
+    for path, empty in CHANGE_POINT_RESTORABLE:
+        parent = out
+        for key in path[:-1]:
+            child = parent.get(key)
+            if not isinstance(child, dict):
+                parent = None
+                break
+            child = dict(child)
+            parent[key] = child
+            parent = child
+        if parent is not None and path[-1] not in parent:
+            parent[path[-1]] = type(empty)()
+    return out
+
+
+def strictly_restoring(model: type[M]) -> type[M]:
+    """``strictly(model)`` for a change point copied by an agent: the known omissions are restored first (see above)."""
+    strict = _StrictJson(model)
+    return Annotated[model, BeforeValidator(lambda v: strict(restore_known_change_point_omissions(v)))]  # type: ignore[return-value]

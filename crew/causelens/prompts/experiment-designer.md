@@ -30,7 +30,8 @@ Recommend the randomized experiment that would settle what the data cannot, or c
 ## Report
 
 Finish with a short report: what you called (tool names), what each returned (quote the values with their intervals and sample sizes), the
-evidence strength and why, the alternatives you considered, anything that remains unexplained, and what you could not establish.
+evidence strength exactly as a tool stated it (`evidence_strength` from `design_experiment`, which is the tools' own assessment), the alternatives you considered, anything that remains unexplained, and
+what you could not establish.
 
 ## Scientist rules (verbatim from the repository's steering file)
 

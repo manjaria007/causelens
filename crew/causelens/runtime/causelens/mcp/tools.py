@@ -21,6 +21,7 @@ from typing import Literal, ParamSpec, TypeVar
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import RootModel
 
 from causelens.analytics import (
     CandidateMatchResult,
@@ -55,6 +56,10 @@ from causelens.analytics import project_impact as _project_impact
 from causelens.analytics import run_placebo as _run_placebo
 from causelens.analytics import test_candidates as _test_candidates
 from causelens.analytics import test_event_scope as _test_event_scope
+from causelens.analytics.decompose_summary import (
+    DecompositionSummary,
+    summarize_decomposition,
+)
 from causelens.analytics.loaders import DIMENSIONS
 from causelens.mcp.datasets import DatasetCatalog, DatasetError, DatasetRegistry
 from causelens.mcp.models import (
@@ -71,6 +76,7 @@ from causelens.mcp.models import (
     StrictFloat,
     StrictInt,
     strictly,
+    strictly_restoring,
 )
 from causelens.mcp.provenance import (
     require_candidate_result,
@@ -85,11 +91,29 @@ R = TypeVar("R")
 # Model-typed arguments are validated as strict JSON (see causelens.mcp.models.strictly); the published schemas are unchanged.
 QualityIn = strictly(DataQualityReport)
 DetectorIn = strictly(DetectorParams)
-ChangePointIn = strictly(ChangePointResult)
+# A change point copied into match_event_candidates gets its three known omitted empty containers restored (see strictly_restoring).
+ChangePointIn = strictly_restoring(ChangePointResult)
 DecompositionIn = strictly(DecompositionResult)
 CandidateTestingIn = strictly(CandidateTestingResult)
 DidIn = strictly(DidResult)
 PatternIn = strictly(ExpectedPattern)
+
+class DecomposeChangeOutput(RootModel[DecompositionResult | DecompositionSummary]):
+    """decompose_change's output: the full ``DecompositionResult`` (``detail="full"``, the default, unchanged on the wire) or the
+    ``DecompositionSummary`` (``detail="summary"``). A root model, so neither is wrapped; the schema is an object with the two alternatives."""
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):  # type: ignore[no-untyped-def]
+        """An object schema: ``anyOf`` the two results, with the properties both declare identically listed at the top level."""
+        schema = handler(core_schema)
+        schema = handler.resolve_ref_schema(schema) if "$ref" in schema else schema
+        alternatives = [handler.resolve_ref_schema(a) for a in schema.get("anyOf", [])]
+        common: dict = {}
+        if len(alternatives) == 2:
+            first, second = (a.get("properties", {}) for a in alternatives)
+            common = {k: v for k, v in first.items() if second.get(k) == v}
+        return {"type": "object", "properties": common, **schema}
+
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
@@ -286,19 +310,33 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         fdr_family: Literal["scan", "partition"] = "scan",
         inference: Literal["day_level", "binomial"] = "day_level",
         min_days_per_window: StrictInt = 7,
-    ) -> DecompositionResult:
+        detail: Literal["full", "summary"] = "full",
+    ) -> DecomposeChangeOutput:
         """Where did the change happen? Rate and mix effects per segment, FDR-adjusted tests, and a localization.
 
         Describes where the change is concentrated, not why. Insufficient data is a normal result. Deterministic.
+
+        ``detail="full"`` (default) returns every segment of every partition (150-250 kB on the reference data). ``detail="summary"`` returns a
+        ``DecompositionSummary`` of about 10 kB: the windows, settings, exclusions and assumptions, the localization with each selected
+        segment's effect, interval, sample size and FDR-adjusted test, the selected share and the partition's remainder copied exactly, and
+        the reasons when nothing is localized. A summary is not accepted as a ``decomposition`` input; call ``test_candidates`` without one and
+        it recomputes the decomposition from the same dataset and windows.
         """
         data = registry.load(dataset_id)
         require_quality(quality, data)
-        return _decompose_change(
+        full = _decompose_change(
             data.metrics, pre_window.as_tuple(), post_window.as_tuple(), data.events, dimensions=dimensions,
             include_pairs=include_pairs, quality=quality, apply_exclusions=apply_exclusions, detector_params=detector_params,
             alpha=alpha, level=level, explain_threshold=explain_threshold, max_localized_traffic_share=max_localized_traffic_share,
             fdr_family=fdr_family, inference=inference, min_days_per_window=min_days_per_window,
         )
+        if detail == "full":
+            return DecomposeChangeOutput(full)
+        return DecomposeChangeOutput(summarize_decomposition(
+            full, dimensions=dimensions, include_pairs=include_pairs, explain_threshold=explain_threshold,
+            max_localized_traffic_share=max_localized_traffic_share, min_days_per_window=min_days_per_window,
+            apply_exclusions=apply_exclusions,
+        ))
 
     @tool
     @_guarded

@@ -39,6 +39,7 @@ ROLES: dict[str, dict[str, object]] = {
     "detective": {
         "title": "Detective",
         "tools": ["list_datasets", "check_data_quality", "daily_series", "confirm_change", "detect_change_point", "match_event_candidates", "decompose_change"],
+        "strength_source": "`causal_attribution` in the `decompose_change` summary; never a label of your own",
         "job": (
             "Check the data first (a tracking break is a valid explanation), confirm the change is real, find when it started and where it is "
             "concentrated. Describe when and where. Do not say why: that is for the Scientist."
@@ -54,8 +55,13 @@ ROLES: dict[str, dict[str, object]] = {
 5. `confirm_change` with those windows. If its verdict is not `real_change`, or its status is `insufficient_data`, stop and report that, with
    the tool's own "data needed" figures. Do not continue.
 6. `match_event_candidates` with `change_point` set to the **complete result object of `detect_change_point`, copied exactly**.
-7. `decompose_change` with the same windows and nothing else. Report the localized segment, its share of the change, the FDR family and
-   number of tests, and what remains unexplained (the tool's `remaining_share_of_change`, shown as returned).
+7. `decompose_change` with the same windows and `detail` set to `"summary"` (the full result is far too large to read). Report from the summary:
+   the localization (`localization.partition`, `localization.segments`, `selected_share_of_change`, `traffic_share_post`), each selected
+   segment's effect with its interval, sessions and FDR-adjusted q (`selected_segments[].effect`), the FDR family and `n_tests_scanned`, and
+   what remains unexplained (`remainder.selected_set.remaining_share_of_change` and `remainder.rate_effect_not_distinguishable_pp`) exactly as
+   returned, even when negative. If `localization` is null, quote `localization_note` and `unavailable_reasons` instead.
+8. Evidence for a cause: quote `causal_attribution` from that summary (its `strength` and `reason`) word for word. Do not grade the evidence
+   yourself: no causal check is yours to run.
 
 Hand the Scientist: the dataset id, the two windows, the excluded dates, the change point's plausible range, the localized segment, and the
 event names that coincide with it. Pass numbers by quoting them, never by recomputing them.""",
@@ -63,6 +69,7 @@ event names that coincide with it. Pass numbers by quoting them, never by recomp
     "scientist": {
         "title": "Scientist",
         "tools": ["test_candidates", "test_event_scope", "estimate_did", "run_placebo", "check_pre_trends", "project_impact"],
+        "strength_source": "`evidence.strength` and its reasons from `test_candidates`, per candidate",
         "job": (
             "Test every candidate explanation with the deterministic tools, report each verdict with its stated lag, and estimate the effect of a "
             "supported candidate with its checks and assumptions. A rejection is of a named hypothesis; it does not mean an event contributed nothing."
@@ -86,6 +93,7 @@ under the listed assumptions and the stated lag, never as a certain cause.""",
     "experiment-designer": {
         "title": "Experiment designer",
         "tools": ["power_analysis", "design_experiment", "test_candidates"],
+        "strength_source": "`evidence_strength` from `design_experiment`, which is the tools' own assessment",
         "job": (
             "Recommend the randomized experiment that would settle what the data cannot, or confirm a strong result. Sample size and duration come "
             "from the power tools, never from you."
@@ -144,7 +152,8 @@ uncertainty, and recommends the experiment that would settle what the data canno
 ## Report
 
 Finish with a short report: what you called (tool names), what each returned (quote the values with their intervals and sample sizes), the
-evidence strength and why, the alternatives you considered, anything that remains unexplained, and what you could not establish.
+evidence strength exactly as a tool stated it ({role['strength_source']}), the alternatives you considered, anything that remains unexplained, and
+what you could not establish.
 
 ## Scientist rules (verbatim from the repository's steering file)
 

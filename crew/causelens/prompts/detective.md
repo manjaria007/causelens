@@ -28,8 +28,13 @@ Check the data first (a tracking break is a valid explanation), confirm the chan
 5. `confirm_change` with those windows. If its verdict is not `real_change`, or its status is `insufficient_data`, stop and report that, with
    the tool's own "data needed" figures. Do not continue.
 6. `match_event_candidates` with `change_point` set to the **complete result object of `detect_change_point`, copied exactly**.
-7. `decompose_change` with the same windows and nothing else. Report the localized segment, its share of the change, the FDR family and
-   number of tests, and what remains unexplained (the tool's `remaining_share_of_change`, shown as returned).
+7. `decompose_change` with the same windows and `detail` set to `"summary"` (the full result is far too large to read). Report from the summary:
+   the localization (`localization.partition`, `localization.segments`, `selected_share_of_change`, `traffic_share_post`), each selected
+   segment's effect with its interval, sessions and FDR-adjusted q (`selected_segments[].effect`), the FDR family and `n_tests_scanned`, and
+   what remains unexplained (`remainder.selected_set.remaining_share_of_change` and `remainder.rate_effect_not_distinguishable_pp`) exactly as
+   returned, even when negative. If `localization` is null, quote `localization_note` and `unavailable_reasons` instead.
+8. Evidence for a cause: quote `causal_attribution` from that summary (its `strength` and `reason`) word for word. Do not grade the evidence
+   yourself: no causal check is yours to run.
 
 Hand the Scientist: the dataset id, the two windows, the excluded dates, the change point's plausible range, the localized segment, and the
 event names that coincide with it. Pass numbers by quoting them, never by recomputing them.
@@ -37,7 +42,8 @@ event names that coincide with it. Pass numbers by quoting them, never by recomp
 ## Report
 
 Finish with a short report: what you called (tool names), what each returned (quote the values with their intervals and sample sizes), the
-evidence strength and why, the alternatives you considered, anything that remains unexplained, and what you could not establish.
+evidence strength exactly as a tool stated it (`causal_attribution` in the `decompose_change` summary; never a label of your own), the alternatives you considered, anything that remains unexplained, and
+what you could not establish.
 
 ## Scientist rules (verbatim from the repository's steering file)
 

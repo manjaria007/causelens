@@ -5,6 +5,7 @@ that evidence comes from the native steps recorded in ``KIRO_NOTES.md``.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -82,10 +83,12 @@ def test_the_requirements_cover_every_third_party_import_of_the_runtime():
     stdlib = set(sys.stdlib_module_names)
     imported: set[str] = set()
     for path in [*(APP / "runtime" / "causelens").rglob("*.py"), APP / "mcp_server.py"]:
-        for line in path.read_text().splitlines():
-            m = re.match(r"\s*(?:from|import)\s+([A-Za-z_]\w*)", line)
-            if m and m.group(1) not in stdlib | {"causelens", "__future__"}:
-                imported.add(m.group(1).lower())
+        for node in ast.walk(ast.parse(path.read_text())):  # real import statements only, not prose in docstrings
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) and node.level == 0 else []
+            for name in names:
+                top = (name or "").split(".")[0]
+                if top and top not in stdlib | {"causelens", "__future__"}:
+                    imported.add(top.lower())
     assert imported <= declared, imported - declared
     assert not {"pytest", "hypothesis", "ruff"} & declared  # runtime only
 
