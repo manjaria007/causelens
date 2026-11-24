@@ -4,21 +4,21 @@
   "prompt": "file://{APP_ROOT}/prompts/detective.md",
   "model": "auto",
   "tools": [
-    "@causelens/list_datasets",
-    "@causelens/check_data_quality",
-    "@causelens/daily_series",
-    "@causelens/confirm_change",
-    "@causelens/detect_change_point",
-    "@causelens/match_event_candidates",
-    "@causelens/decompose_change"
+    "@causelens:causelens/list_datasets",
+    "@causelens:causelens/check_data_quality",
+    "@causelens:causelens/daily_series",
+    "@causelens:causelens/confirm_change",
+    "@causelens:causelens/detect_change_point",
+    "@causelens:causelens/match_event_candidates",
+    "@causelens:causelens/decompose_change"
   ],
   "allowedTools": [
-    "@causelens/list_datasets",
-    "@causelens/check_data_quality",
-    "@causelens/daily_series",
-    "@causelens/confirm_change",
-    "@causelens/detect_change_point",
-    "@causelens/match_event_candidates",
-    "@causelens/decompose_change"
+    "@causelens:causelens/list_datasets",
+    "@causelens:causelens/check_data_quality",
+    "@causelens:causelens/daily_series",
+    "@causelens:causelens/confirm_change",
+    "@causelens:causelens/detect_change_point",
+    "@causelens:causelens/match_event_candidates",
+    "@causelens:causelens/decompose_change"
   ]
 }

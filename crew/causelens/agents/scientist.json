@@ -4,19 +4,19 @@
   "prompt": "file://{APP_ROOT}/prompts/scientist.md",
   "model": "auto",
   "tools": [
-    "@causelens/test_candidates",
-    "@causelens/test_event_scope",
-    "@causelens/estimate_did",
-    "@causelens/run_placebo",
-    "@causelens/check_pre_trends",
-    "@causelens/project_impact"
+    "@causelens:causelens/test_candidates",
+    "@causelens:causelens/test_event_scope",
+    "@causelens:causelens/estimate_did",
+    "@causelens:causelens/run_placebo",
+    "@causelens:causelens/check_pre_trends",
+    "@causelens:causelens/project_impact"
   ],
   "allowedTools": [
-    "@causelens/test_candidates",
-    "@causelens/test_event_scope",
-    "@causelens/estimate_did",
-    "@causelens/run_placebo",
-    "@causelens/check_pre_trends",
-    "@causelens/project_impact"
+    "@causelens:causelens/test_candidates",
+    "@causelens:causelens/test_event_scope",
+    "@causelens:causelens/estimate_did",
+    "@causelens:causelens/run_placebo",
+    "@causelens:causelens/check_pre_trends",
+    "@causelens:causelens/project_impact"
   ]
 }

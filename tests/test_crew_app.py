@@ -121,14 +121,15 @@ def test_each_agent_has_its_role_tools_and_an_app_contained_prompt():
     for slug, tools in expected.items():
         spec = agent(slug)
         names = {t.split("/", 1)[1] for t in spec["tools"]}
-        assert all(t.startswith("@causelens/") for t in spec["tools"]) and names <= set(TOOL_NAMES) and names == tools - ({"list_datasets"} if False else set())
+        # Crew registers an app's server as "<app>:<server>" ("causelens:causelens"), so that is the name a tool ref must use
+        assert all(t.startswith("@causelens:causelens/") for t in spec["tools"]) and names <= set(TOOL_NAMES) and names == tools
         assert spec["allowedTools"] == spec["tools"]  # every tool is read-only
         assert spec["prompt"] == f"file://{{APP_ROOT}}/prompts/{slug}.md" and (APP / "prompts" / f"{slug}.md").is_file()
         assert spec["name"] == f"causelens-{slug}"
 
 
 def test_the_role_tool_sets_follow_the_python_roles_except_for_the_documented_designer_addition():
-    assert {t.split("/")[1] for t in agent("detective")["tools"]} == set(DETECTIVE.tools)
+    assert {t.split("/")[1] for t in agent("detective")["tools"]} == set(DETECTIVE.tools)  # refs are "@causelens:causelens/<tool>"
     assert {t.split("/")[1] for t in agent("scientist")["tools"]} == set(SCIENTIST.tools)
     assert {t.split("/")[1] for t in agent("experiment-designer")["tools"]} == set(EXPERIMENT_DESIGNER.tools) | {"test_candidates"}
     assert set(TOOL_NAMES) == set(DETECTIVE.tools) | set(SCIENTIST.tools) | set(EXPERIMENT_DESIGNER.tools)  # all 15 are used by some agent
@@ -234,6 +235,23 @@ needs_crew = pytest.mark.skipif(KIROCREW is None, reason="kirocrew is not instal
 def test_crew_validates_the_agent_specs():
     out = subprocess.run([KIROCREW, "agent", "validate", str(APP / "agents")], check=False, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0 and "0 problem(s)" in out.stdout + out.stderr
+
+
+@needs_crew
+def test_crew_resolves_every_agent_tool_ref_against_the_server_it_registers():
+    """Crew 0.13.1 namespaces an app's server as "<app>:<server>" and only warns (kiro-cli then silently mounts nothing) for a ref it
+    cannot resolve. Ask Crew's own resolver, with the server map Crew builds, whether any ref would dangle."""
+    python = Path(KIROCREW).resolve().parent / "python"
+    if not python.exists():
+        pytest.skip("cannot find Crew's interpreter next to its launcher")
+    servers = {f"{MANIFEST['name']}:{name}": spec for name, spec in MANIFEST["mcpServers"].items()}
+    for slug in ("detective", "scientist", "experiment-designer"):
+        spec = {**agent(slug), "mcpServers": servers}
+        code = ("import json, sys; from kiro_crew.apps.bridges_agents import _unresolvable_tool_refs; "
+                "print(json.dumps(_unresolvable_tool_refs(json.loads(sys.stdin.read()))))")
+        out = subprocess.run([str(python), "-c", code], input=json.dumps(spec), check=False, capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr[-2000:]
+        assert json.loads(out.stdout.strip().splitlines()[-1]) == [], (slug, out.stdout)
 
 
 @needs_crew

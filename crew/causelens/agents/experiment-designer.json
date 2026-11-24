@@ -4,13 +4,13 @@
   "prompt": "file://{APP_ROOT}/prompts/experiment-designer.md",
   "model": "auto",
   "tools": [
-    "@causelens/power_analysis",
-    "@causelens/design_experiment",
-    "@causelens/test_candidates"
+    "@causelens:causelens/power_analysis",
+    "@causelens:causelens/design_experiment",
+    "@causelens:causelens/test_candidates"
   ],
   "allowedTools": [
-    "@causelens/power_analysis",
-    "@causelens/design_experiment",
-    "@causelens/test_candidates"
+    "@causelens:causelens/power_analysis",
+    "@causelens:causelens/design_experiment",
+    "@causelens:causelens/test_candidates"
   ]
 }
