@@ -924,3 +924,31 @@ not perform are listed under "Not done" in the final block.
 - UI: `ui/src/App.tsx` (the scaffold's ESM component contract) with a `ChatEmbed` and the packaged static console labelled as a static reference result.
   Built with `npm install --legacy-peer-deps && npm run build` (plain `npm install` fails because the scaffold lists `@kirocrew/app-sdk`, which is not on npm,
   as a peer dependency). The built `ui/dist/index.mjs` is committed, because a registry install does not build an app whose `package.json` is not at the app root.
+- Crew's own interpreter: I installed the app's `requirements.txt` with Crew's Python 3.12.13 into a scratch `--target` directory (not into Crew's venv;
+  its `truststore` 0.10.4 and `opentelemetry-api` 1.44.0 are unchanged, pip only warned about the scratch copy) and started a copied app with that
+  interpreter: 15 tools including `daily_series`, `check_data_quality` excluded `["2026-09-20"]`, `daily_series` returned 92 points. This imitates what
+  Crew's provisioning does; it is not Crew's registration.
+
+### Block 3 (partial): registry, Discover listing and the install attempt (spec task 4.1, start of 4.2)
+
+- Committed a repo-root `app-registry.json` with one entry (`causelens`, `subdirectory: crew/causelens`). Opted in with
+  `kirocrew config set registries` to `{"name": "causelens-dev", "repo": "https://github.com/manjaria007/causelens", "branch": "crew-app"}`; Crew stored it with
+  `"trust": "index"`. The branch is `crew-app` until this is merged; then it should be `main`.
+- Started `kirocrew gateway` in the background (it is still running, port 5476). Its log: "External registry causelens-dev entry 'causelens' declares branch
+  'main'; using the configured registry branch 'crew-app'".
+- `GET /api/apps/registry` (the list the Discover page renders), with the owner's dashboard session: CauseLens is listed from `_registry: causelens-dev`,
+  `provenance: external`, `verified: false`, `installed: false`, with its manifest, icon URL and the three agents. **This is the API behind Discover, not a
+  screenshot of the Discover page.**
+- `POST /api/apps/registry/install` for `causelens` (the Install button's endpoint) returned HTTP 400, `code: app_execution_denied`: "third-party app execution
+  is disabled; trust this app alone from the dashboard's App Store, whose install, update and enable prompts ask for it (agent.apps_trusted), or set
+  agent.apps_allow_third_party=true". `agent.apps_trusted` is `[]` and `agent.apps_allow_third_party` is `false`. I stopped there: granting a third-party
+  app permission to run code on this machine is the owner's decision in the trust prompt, and I did not change either setting.
+
+### Not done yet (needs the owner at the dashboard and in Kiro)
+
+- 1.2: the interactive `kirocrew setup` wizard was not run (doctor reports kiro-cli's sign-in as the agent backend's auth).
+- 1.3 and 5.2: the native Kiro MCP panel with 15 tools has not been captured.
+- 4.2: install from Discover, the trust review, enable, `kirocrew app dev causelens`.
+- 2.3's remaining part (Crew starting the packaged server from its own install), 3.2, 3.3 and 5.1: no native Crew session has run the agents, so there is no
+  transcript, Activity or export.
+- 5.3: Stop-hook baseline at the end of this block is in the final summary; whether a new block appears after this agent turn has to be checked afterwards.
