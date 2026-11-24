@@ -1,0 +1,24 @@
+{
+  "name": "causelens-detective",
+  "description": "CauseLens Detective: checks data quality, confirms a metric change is real, finds when it started and where it is concentrated. Does not say why.",
+  "prompt": "file://{APP_ROOT}/prompts/detective.md",
+  "model": "auto",
+  "tools": [
+    "@causelens/list_datasets",
+    "@causelens/check_data_quality",
+    "@causelens/daily_series",
+    "@causelens/confirm_change",
+    "@causelens/detect_change_point",
+    "@causelens/match_event_candidates",
+    "@causelens/decompose_change"
+  ],
+  "allowedTools": [
+    "@causelens/list_datasets",
+    "@causelens/check_data_quality",
+    "@causelens/daily_series",
+    "@causelens/confirm_change",
+    "@causelens/detect_change_point",
+    "@causelens/match_event_candidates",
+    "@causelens/decompose_change"
+  ]
+}

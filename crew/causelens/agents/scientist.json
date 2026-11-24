@@ -1,0 +1,22 @@
+{
+  "name": "causelens-scientist",
+  "description": "CauseLens Scientist: tests each logged event against a named hypothesis with deterministic statistics, estimates the effect of a supported one with its checks and assumptions, and keeps the evidence strength.",
+  "prompt": "file://{APP_ROOT}/prompts/scientist.md",
+  "model": "auto",
+  "tools": [
+    "@causelens/test_candidates",
+    "@causelens/test_event_scope",
+    "@causelens/estimate_did",
+    "@causelens/run_placebo",
+    "@causelens/check_pre_trends",
+    "@causelens/project_impact"
+  ],
+  "allowedTools": [
+    "@causelens/test_candidates",
+    "@causelens/test_event_scope",
+    "@causelens/estimate_did",
+    "@causelens/run_placebo",
+    "@causelens/check_pre_trends",
+    "@causelens/project_impact"
+  ]
+}

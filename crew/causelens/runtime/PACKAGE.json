@@ -1,0 +1,27 @@
+{
+  "files": {
+    "causelens/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "causelens/analytics/__init__.py": "2bc9640a65f662b135784f6d6ca00fdc8e80cc53f2f868917c88f05e21b6c554",
+    "causelens/analytics/candidates.py": "7b646c9d9a14fe88815e47808e4352c27e36c7f0a6a8bd8f61098159f6c04747",
+    "causelens/analytics/changepoint.py": "54b150788b287c507f142baa1ee77c4d38762a65b4d7f8b1c58876cf32c1a5a9",
+    "causelens/analytics/confirm.py": "ddc4d8b00ecb2fa0a81b5db900c10ffca32e03e1dd9555987a92a71edd66ee1d",
+    "causelens/analytics/daily.py": "4ae9e8604d998d13bb31c49b077d1795b9ef670e42f8239648290dde1c17aeba",
+    "causelens/analytics/data_quality.py": "bfb1bba7c5a02c03b262eaddc64da0d8aceb7ef41986d80828c45aa11932684f",
+    "causelens/analytics/decompose.py": "3aa07d05c1eb1662a9c448f6a153ee8d6998611dedc6c2f956b6fc41f39f834b",
+    "causelens/analytics/did.py": "b5131717d37d925b0961b7664f9a8e59e68406a0df0335ea9c3f20b097b5483e",
+    "causelens/analytics/evidence.py": "a102420701df5d1e819821baeb10acc7243db59eeb182a22dd58911820ee654b",
+    "causelens/analytics/experiment.py": "e3b07b0affb1f449539fba27e22d89b71cf6b81b6cac3c6a0501d1a209dea43f",
+    "causelens/analytics/loaders.py": "e4e90fbfe98ad3c9a6168fed91d1896535a00098d7fe91336ac0156fb48066ad",
+    "causelens/analytics/patterns.py": "909e9c4ebd3e15a16481dca3f989421d2efb9bd09b61e05fd4c7304f0d9e337b",
+    "causelens/analytics/series.py": "3ced5060f8d76d58c17032395a86e42e1d0f8bacf05a8b2c10c14620848d496b",
+    "causelens/analytics/timing.py": "6887cd5d03e2b47a53b3130914dbd800e0b9f14e5087670b9d140c928209b456",
+    "causelens/mcp/__init__.py": "e989994744275e6dc63af4b46973776c93e13cb7c6f6922a9207da1889cd737c",
+    "causelens/mcp/__main__.py": "00ba08fc359bfce9ee9bcb2d868834026b6e3aac03666839d12e809a8433a102",
+    "causelens/mcp/datasets.py": "83f81e20fa079a61bf34c168659fdb70900446b93c0e600a81a9eee7bcb1eff0",
+    "causelens/mcp/models.py": "c1d9925cef00a6cb3d2be2411120820ca510b20d5fff91e3bc8c7cdbb8d6c9bd",
+    "causelens/mcp/provenance.py": "1c948a79de701cf15ebac6c3cfe49f05d28666e5d931fad5c457132f456d6e90",
+    "causelens/mcp/server.py": "d2523d751463bc3fb9e5beb97f49ed861cd2c19f83b018e84c30839d59b22a39",
+    "causelens/mcp/tools.py": "ec8798b1772a20d7496405232e68f408f7cb2e8fa9cfb501e8c58da16b561eb4"
+  },
+  "source": "causelens/analytics and causelens/mcp of this repository"
+}

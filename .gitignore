@@ -17,6 +17,7 @@ venv/
 # Build / cache
 dist/
 build/
+!crew/causelens/ui/dist/
 .pytest_cache/
 .mypy_cache/
 .coverage

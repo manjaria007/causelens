@@ -883,3 +883,44 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   and 390px widths: the requested result-driven headline, six steps, no scripts/external requests or
   page overflow. The installed Crew UI scaffold was created in scratch and its sample agent schema
   validated with zero problems; this was not the CauseLens app implementation.
+
+## Crew app (`.kiro/specs/crew-app`, branch `crew-app`)
+
+This section records what I observed on this Mac while following `docs/crew-handoff.md`. Prepared files are not evidence of a native run; steps I could
+not perform are listed under "Not done" in the final block.
+
+### Block 1: environment (spec task 1)
+
+- Repository: `git remote get-url origin` is `https://github.com/manjaria007/causelens.git`. Working directory `/Users/mickey/onenumber/causelens-cli`.
+- **Backup before updating `main`.** The unstaged edit to `.kiro/settings/mcp.json` (absolute `/Users/mickey/onenumber/causelens-cli` launcher path and
+  `PYTHONPATH`, no other servers) was copied to `/Users/mickey/onenumber/backups/mcp-settings-20261123-183650/` (`mcp.json`, `mcp.json.diff`, `head.txt`;
+  SHA-256 of the copy equals the original, `1e4ee4e6...9d2`). The handoff's suggested `/tmp` location would not survive a reboot, so I used a directory
+  outside `/tmp`. The backup holds no other server entries, so there was nothing to reapply. I then ran `git checkout -- .kiro/settings/mcp.json`
+  (that file only), created local `main` from `origin/main` at `bc12202`, and branched `crew-app` from it. The committed config is the relative
+  `/bin/bash scripts/mcp_stdio.sh`. I did not commit the old Mac path.
+- Versions observed: `kirocrew 0.13.1` (already installed at `~/.local/bin/kirocrew`; I did not run the installer), `kiro-cli 3.5.0`, Python 3.14.5 (repo
+  `.venv`), Crew's own interpreter Python 3.12 (`~/.kiro/crew-venv`), Node v26.13.1, npm 11.20.0.
+- `kirocrew doctor` exit 0, ending "Kiro Crew is ready!": edition standalone; `kiro-cli` found; "kiro auth: kiro-cli's own sign-in"; "kas auth: kiro-cli's own
+  sign-in"; connectivity `kiro-cli 3.5.0`; **gateway: not running** at the time. Warnings printed: no cgroup enforcement (not Linux); speech-to-text
+  dependencies and `ffmpeg` missing (not needed here); no optional agent backends (claude, codex). Side effect I observed: doctor logged "Managed agent config
+  /Users/mickey/.kiro/agents/kirocrew.json missing, regenerating" and the `kirocrew-*.json` agent files in `~/.kiro/agents/` are dated that minute, so running
+  doctor wrote them. I did not run the interactive `kirocrew setup` wizard.
+- `.venv/bin/python -m ruff --version`: `ruff 0.17.6`.
+- Stop-hook baseline (not yet a proof): `.pytest_cache/stop-hook-runs.log` has 48 lines. Its last block is `=== stop hook start 2026-11-23T01:23:26Z
+  cwd=/Users/mickey/onenumber/causelens-cli` ... `ruff_exit=0`; `date -u` at capture was `2026-11-23T23:39:47Z`. Earlier blocks (from 2026-11-21T16:48:35Z) show the hook
+  has run with this clone's `cwd`; I never invoked the hook command myself in this session, but I cannot show which agent turns produced which blocks.
+
+### Block 2: the installable app (spec task 2)
+
+- `kirocrew app init causelens --dir ... --ui` scaffold inspected, then copied to `crew/causelens/` and edited. The manifest declares the MCP server as the
+  one relative form the installed Crew documents (a bare `python3` with a relative `.py` argument resolved against the app root): `python3 mcp_server.py`.
+  `requirements.txt` is provisioned by Crew for a stdio server. The runtime (`analytics/`, `mcp/`) and the observed reference data are packaged inside the
+  app by `scripts/package_crew_app.py` (`--check` detects drift); the simulator and the answer key are not shipped.
+- Validated with the installed release: `kirocrew agent validate crew/causelens/agents` reports "Checked 3 agent spec(s): 0 problem(s)"; Crew's
+  `AppManifest.from_json_file(...)` loads `app.json` and `validate(...)` returns `[]`.
+- Copied-location test: the app tree copied elsewhere starts with `python mcp_server.py` (no `PYTHONPATH`, another working directory) and serves all 15 tools
+  over stdio, `list_datasets` returns 5,888 rows with the `7c8fe7196f23...` fingerprint, and `check_data_quality` returns `["2026-09-20"]`. That test uses the repo's
+  Python 3.14 interpreter, not Crew's registration, so it does not yet show how Crew starts the server.
+- UI: `ui/src/App.tsx` (the scaffold's ESM component contract) with a `ChatEmbed` and the packaged static console labelled as a static reference result.
+  Built with `npm install --legacy-peer-deps && npm run build` (plain `npm install` fails because the scaffold lists `@kirocrew/app-sdk`, which is not on npm,
+  as a peer dependency). The built `ui/dist/index.mjs` is committed, because a registry install does not build an app whose `package.json` is not at the app root.
