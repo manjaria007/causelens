@@ -946,8 +946,7 @@ not perform are listed under "Not done" in the final block.
 
 ### Not done yet (needs the owner at the dashboard and in Kiro)
 
-- 1.2: the interactive `kirocrew setup` wizard was not run (doctor reports kiro-cli's sign-in as the agent backend's auth).
-- 1.3 and 5.2: the native Kiro MCP panel with 15 tools has not been captured.
+- (1.2 and 1.3 were completed in the next turn; see below.) 5.2: the native Kiro MCP panel with 15 tools has not been captured.
 - 4.2: install from Discover, the trust review, enable, `kirocrew app dev causelens`.
 - 2.3's remaining part (Crew starting the packaged server from its own install), 3.2, 3.3 and 5.1: no native Crew session has run the agents, so there is no
   transcript, Activity or export.
@@ -959,13 +958,13 @@ not perform are listed under "Not done" in the final block.
   - Doctor: recorded above (exit 0, "Kiro Crew is ready!", kiro-cli sign-in, gateway not running at the time).
   - Setup: missing until now. I backed up `~/.kiro/agents/*.json` (14 files) to `/Users/mickey/onenumber/backups/kiro-agents-20261123-191957/` and ran
     `kirocrew setup --agent-only`: exit 0, "Agent installed: /Users/mickey/.kiro/agents/kirocrew.json". The interactive wizard steps were skipped by that flag;
-    I did not run the interactive wizard, so 1.2 stays unchecked.
+    I did not run the interactive wizard. (Superseded below: the checklist now names `--agent-only`, and 1.2 is checked.)
   - Fifteen tools: in this native Kiro CLI 3.5.0 session the attached `causelens` server offers exactly 15 tools (`check_data_quality`, `check_pre_trends`,
     `confirm_change`, `daily_series`, `decompose_change`, `design_experiment`, `detect_change_point`, `estimate_did`, `list_datasets`,
     `match_event_candidates`, `power_analysis`, `project_impact`, `run_placebo`, `test_candidates`, `test_event_scope`). A fresh attached call to
     `daily_series` (dataset `reference`, segment mobile/safari) returned 92 points from 2026-08-01 to 2026-10-31, 2026-09-20 marked `excluded`, no missing dates,
     and the post-review assumption text, so the attached server runs the current code. I did not reconnect the server and this is not a screenshot of the MCP
-    panel, so 1.3 stays unchecked; the panel capture is still needed.
+    panel. (Superseded below: 1.3 now names the attached call and is checked; the panel capture stays in 5.2.)
 - **Stop hook, observed.** After my previous turn ended, `.pytest_cache/stop-hook-runs.log` grew from 48 to 51 lines with a new block:
   `=== stop hook start 2026-11-24T00:09:03Z cwd=/Users/mickey/onenumber/causelens-cli`, `All checks passed!`, `=== stop hook end 2026-11-24T00:09:03Z ruff_exit=0`.
   My last command of that turn ran at 2026-11-24T00:08:46Z (the baseline capture) and I did not invoke the hook command. That is a fresh automatic block after a
@@ -983,3 +982,40 @@ not perform are listed under "Not done" in the final block.
   - Focused checks: `tests/test_crew_app.py` (22), plus the MCP server, CLI and daily-series tests: 159 passed; Ruff passed. Not the full suite.
   - 2.3 is checked on this basis: the packaged launcher works from a copy outside the checkout under Crew's interpreter. Crew's own registration of the server
     (provisioning `requirements.txt` and resolving `python3 mcp_server.py` itself) can only be observed after install, which is Task 4.
+
+### Task 1 checklist corrected, and Task 3 (UI and local checks)
+
+- Remote confirmed `https://github.com/manjaria007/causelens.git`; branch `crew-app`; PR #13 open and not merged by me.
+- **Task 1 wording.** `tasks.md` 1.2 now names what ran: `kirocrew setup --agent-only` (exit 0, agent config installed) and `kirocrew doctor` (exit 0, kiro-cli's
+  own sign-in reported for the kiro and kas backends). The interactive wizard did not run and is stated as not run. 1.3 now names the native evidence: 15
+  attached tools in a native Kiro CLI 3.5.0 session and a fresh `daily_series` call. The MCP-panel screenshot stays in 5.2. I did not rerun setup. Parent task 1
+  and parent task 2 are checked because all their subtasks are.
+- **Stop hook, second observation.** After the previous turn ended, the log grew from 51 to 54 lines: `=== stop hook start 2026-11-24T00:26:37Z
+  cwd=/Users/mickey/onenumber/causelens-cli`, `All checks passed!`, `=== stop hook end 2026-11-24T00:26:37Z ruff_exit=0`. I did not run the hook command.
+- **Lint fix.** `crew/causelens/mcp_server.py` had an unused `# noqa: E402` (Ruff RUF100; my earlier Ruff runs did not include `crew/`). Replaced with a plain
+  comment. Ruff now runs on `causelens tests scripts crew`.
+- **Page (3.1).** `ui/src/App.tsx` uses only exports present in the installed SDK's type declarations (`kiro_crew/static/dist/vendor/kirocrew-app-sdk.d.ts`,
+  Crew 0.13.1): `ChatEmbed`, `useChatLauncher` from `@kirocrew/app-sdk`; `PageHeader`, `Card`, `CardTitle`, `Btn`, `EmptyState` from `@kirocrew/app-sdk/ui`.
+  - Agent tabs for Detective, Scientist and Experiment designer. Each mounts a `ChatEmbed` with its own slot (`causelens-<agent>`) and `agent` set to the
+    registered name, using the embed's own send path (the manifest grants `/api/chat`, the documented requirement). A button opens the same agent in a full
+    chat via `useChatLauncher().openChat` with a draft that is not sent automatically.
+  - The packaged console is probed first and shown in a sandboxed iframe only if the file answers as HTML; otherwise an "unavailable" notice with the HTTP status
+    or error. It is labelled "Static reference result" and "not the output of a native Crew agent or of a hosted model". The page states no finding of its own
+    and never falls back to one. A render error in a panel is caught and shown as a message instead of blanking the page.
+  - No MCP-call endpoint or SDK method was invented; the agents reach the tools through Crew's own registration.
+  - Pure logic is in `ui/src/model.ts`.
+- **Build.** `npm ci` fails with 404 on `@kirocrew/app-sdk` (a host-provided peer, not on npm). `npm ci --legacy-peer-deps` installs from the existing
+  lockfile without changing it; `npm run build` gives `dist/index.mjs` (6.20 kB). The flag is documented in the app README. TypeScript was not type-checked
+  (the scaffold ships no `tsc`, and I did not add one).
+- **Tests, with what they are.**
+  - `crew/causelens/ui/test/` (Node's runner, `npm test`): 7 passed. `model.test.mjs` tests `model.ts` directly. `page.test.mjs` renders the built bundle with
+    `react-dom/server` against **test stubs** in `ui/test/stubs/` that stand in for the host SDK and only record what the page passes to them. They check the
+    default agent's `ChatEmbed` props, three tabs, the static label, that the iframe waits for the probe, a single `fetch` to the packaged console, no invented
+    MCP route, and no planted finding in the page's text. They do not run Crew, a chat, an agent or MCP.
+  - `tests/test_crew_app.py`: 26 passed. New: the Node tests run from pytest; the committed bundle equals a fresh build of the committed source; and two
+    checks of the packaged server through the official SDK client (as an agent's calls would arrive, not an agent): with no planted change the tools return
+    `not_distinguishable_from_noise` with `stop_investigation` and support no candidate; with two days removed `daily_series` and `confirm_change` list them as
+    missing (90 points) instead of filling them.
+  - Ruff on `causelens tests scripts crew`: passed. `package_crew_app.py --check`: up to date. Analytics, MCP rules, simulator and reference data unchanged.
+- **Deferred to after Task 4 (install and the owner's trust approval):** the page rendering inside Crew; native agents making real MCP calls (3.2); native
+  insufficient-evidence and missing-data behaviour (3.3); any transcript. I did not change `agent.apps_trusted` or `agent.apps_allow_third_party`.

@@ -18,7 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "runtime"))
 
-from causelens.mcp.__main__ import main  # noqa: E402 - the path above must be set first
+# Imported after the sys.path line above, which makes the packaged runtime importable.
+from causelens.mcp.__main__ import main
 
 if __name__ == "__main__":
     sys.exit(main([

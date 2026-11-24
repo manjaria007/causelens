@@ -17,6 +17,8 @@ It ships a small reference dataset (observed metrics and events only; no answer 
 | `agents/`, `skills/` | native agent definitions and the coordination skill |
 | `ui/` | the Crew page (source in `ui/src`, built `ui/dist/index.mjs`) and the packaged static reference console |
 
+Build the page: `cd ui && npm ci --legacy-peer-deps && npm run build` (the flag is needed because `@kirocrew/app-sdk` is provided by the Crew host and is not on npm). Test it: `npm test` (unit tests and a render against test stubs, not Crew).
+
 Regenerate the generated parts from the repository root: `python scripts/package_crew_app.py` (`--check` reports drift).
 
 ## Install

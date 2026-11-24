@@ -250,15 +250,19 @@ def test_crew_loads_and_validates_the_manifest():
 # --------------------------------------------------------------------------- the Crew page
 
 def test_the_page_labels_the_static_console_and_does_not_present_it_as_agent_output():
-    source = (APP / "ui" / "src" / "App.tsx").read_text()
-    assert "Static reference result" in source and "not the output of a native Crew agent" in source
-    assert "/apps/causelens/ui/console.html" in source and 'sandbox=""' in source
-    assert "callTool" not in source and "/api/mcp/call" not in source  # no invented SDK method or route
+    model = (APP / "ui" / "src" / "model.ts").read_text()
+    page = (APP / "ui" / "src" / "App.tsx").read_text()
+    assert "Static reference result" in model and "not the output of a native Crew agent" in model
+    assert "/apps/causelens/ui/console.html" in model and 'sandbox=""' in page and "STATIC_LABEL" in page
+    for source in (model, page):
+        assert "callTool" not in source and "/api/mcp" not in source  # no invented SDK method or route
+    for name in ("causelens-detective", "causelens-scientist", "causelens-experiment-designer"):
+        assert name in model and (APP / "agents" / f"{name.removeprefix('causelens-')}.json").is_file()
 
 
 def test_the_built_page_matches_the_source_imports():
     built = (APP / "ui" / "dist" / "index.mjs").read_text()
-    assert 'from "@kirocrew/app-sdk"' in built and "ChatEmbed" in built and "Static reference result" in built
+    assert 'from "@kirocrew/app-sdk"' in built and "ChatEmbed" in built and "useChatLauncher" in built and "Static reference result" in built
     assert "export {" in built and "default" in built
     assert MANIFEST["permissions"]["api"] == ["/api/chat"]  # the chat embed's documented grant, nothing else
 
@@ -274,3 +278,73 @@ def test_the_app_contains_no_credentials():
     for spec in (APP / "agents").glob("*.json"):
         assert "env" not in json.loads(spec.read_text())
     assert "env" not in MANIFEST["mcpServers"]["causelens"]
+
+
+# --------------------------------------------------------------------------- the page, rendered with test stubs (not Crew)
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(NODE is None or not (APP / "ui" / "node_modules" / "react").is_dir(),
+                    reason="needs node and `npm ci --legacy-peer-deps` in crew/causelens/ui")
+def test_the_ui_node_tests_pass():
+    """Runs crew/causelens/ui/test/: unit tests of src/model.ts and a render of the BUILT page against stub host modules (test/stubs/).
+    The stubs record what the page asks the host for; nothing here runs Crew, an agent or MCP."""
+    out = subprocess.run([NODE, "--test", "test/"], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
+    assert re.search(r"# pass 7|pass 7", out.stdout) and "fail 0" in out.stdout
+
+
+def test_the_built_bundle_is_current_with_its_source():
+    """The committed dist/index.mjs must come from the committed source: rebuild and compare, when the toolchain is installed."""
+    if NODE is None or not (APP / "ui" / "node_modules" / "vite").is_dir():
+        pytest.skip("needs `npm ci --legacy-peer-deps` in crew/causelens/ui")
+    before = (APP / "ui" / "dist" / "index.mjs").read_bytes()
+    out = subprocess.run(["npm", "run", "build"], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    assert (APP / "ui" / "dist" / "index.mjs").read_bytes() == before
+
+
+# --------------------------------------------------------------------------- the packaged server on data that should not yield a cause
+# These drive the packaged MCP server directly with the SDK client (as an agent's tool calls would arrive). They check what the tools
+# return to an agent; they do not run a native agent, so they say nothing about what an agent writes.
+
+def copy_with_data(tmp_path: Path, metrics) -> Path:
+    dest = tmp_path / "causelens"
+    shutil.copytree(APP, dest, ignore=shutil.ignore_patterns(".venv", ".git", "node_modules", "__pycache__"))
+    metrics.to_csv(dest / "data" / "metrics_daily.csv", index=False)
+    return dest
+
+
+def investigation_calls(app: Path):
+    async def call(client):
+        def body(r):
+            return r.structured_content if not r.is_error else {"error": " ".join(getattr(b, "text", "") for b in r.content)}
+
+        series = body(await client.call_tool("daily_series", {"dataset_id": "reference"}))
+        point = body(await client.call_tool("detect_change_point", {"dataset_id": "reference"}))
+        windows = {"pre_window": {"start": "2026-08-01", "end": "2026-10-13"}, "post_window": {"start": "2026-10-14", "end": "2026-10-31"}}
+        confirm = body(await client.call_tool("confirm_change", {"dataset_id": "reference", **windows}))
+        testing = body(await client.call_tool("test_candidates", {"dataset_id": "reference", **windows}))
+        return series, point, confirm, testing
+
+    return run_over_stdio(app, app, call)
+
+
+def test_with_no_change_in_the_data_the_tools_report_noise_and_support_nothing(tmp_path):
+    sys.path.insert(0, str(ROOT / "tests"))
+    from scenarios import simulate
+
+    metrics, _ = simulate(3, rel=0.0)
+    _series, _point, confirm, testing = investigation_calls(copy_with_data(tmp_path, metrics))
+    assert confirm["verdict"] == "not_distinguishable_from_noise" and confirm["stop_investigation"] is True
+    assert not [c for c in testing.get("candidates", []) if c["verdict"] == "supported"]
+
+
+def test_with_missing_days_the_tools_list_them_instead_of_filling_them(tmp_path):
+    metrics, _, _ = generate(42)
+    gone = ["2026-09-05", "2026-10-20"]
+    series, point, confirm, _testing = investigation_calls(copy_with_data(tmp_path, metrics[~metrics["date"].isin(gone)]))
+    assert series["missing_dates"] == gone and len(series["points"]) == 90
+    assert {str(d) for d in confirm["exclusions"]["missing_dates"]} == set(gone)
+    assert point["status"] in {"ok", "insufficient_data"}
