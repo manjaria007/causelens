@@ -1,10 +1,9 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useState, type ReactNode } from 'react'
 import { ChatEmbed, useChatLauncher } from '@kirocrew/app-sdk'
 import { Btn, Card, CardTitle, EmptyState, PageHeader } from '@kirocrew/app-sdk/ui'
 import { FileWarning } from 'lucide-react'
 import {
   AGENTS,
-  CONSOLE_URL,
   DEFAULT_AGENT,
   LIVE_EXPLANATION,
   STATIC_EXPLANATION,
@@ -15,6 +14,8 @@ import {
   type AgentKey,
   type ConsoleState,
 } from './model'
+// The packaged console (generated into ui/console.html by scripts/package_crew_app.py), inlined as text by Vite at build time.
+import consoleHtml from '../console.html?raw'
 
 /** Keeps a failure in one panel (for example a host without ChatEmbed) from blanking the whole page. */
 class PanelBoundary extends Component<{ what: string; children: ReactNode }, { error: string | null }> {
@@ -72,28 +73,20 @@ function AgentChat() {
 }
 
 function ReferenceConsole() {
-  const [state, setState] = useState<ConsoleState>({ kind: 'checking' })
-  useEffect(() => {
-    let live = true
-    fetch(CONSOLE_URL, { method: 'GET', credentials: 'same-origin' })
-      .then((r) => live && setState(consoleStateFrom({ ok: r.ok, status: r.status, contentType: r.headers.get('content-type') })))
-      .catch((err: unknown) => live && setState(consoleStateFrom({ error: err instanceof Error ? err.message : String(err) })))
-    return () => {
-      live = false
-    }
-  }, [])
+  const state: ConsoleState = consoleStateFrom(consoleHtml)
   return (
     <Card>
       <CardTitle>Reference console ({STATIC_LABEL.toLowerCase()})</CardTitle>
       <p className="text-sm text-muted mb-3">
         <strong>{STATIC_LABEL}.</strong> {STATIC_EXPLANATION}
       </p>
-      {state.kind === 'checking' && <p className="text-sm text-muted">Loading the reference console…</p>}
       {state.kind === 'missing' && <EmptyState icon={<FileWarning size={20} />} title="Reference console unavailable" subtitle={state.detail} />}
       {state.kind === 'ready' && (
+        // sandbox="" : no scripts, no same-origin access, no top navigation. The console's own source links are in-page anchors (#call-N),
+        // which still work inside the frame.
         <iframe
           title={`CauseLens reference console (${STATIC_LABEL.toLowerCase()})`}
-          src={CONSOLE_URL}
+          srcDoc={state.html}
           sandbox=""
           referrerPolicy="no-referrer"
           style={{ width: '100%', height: '70vh', border: '1px solid var(--border, #d5dae3)', borderRadius: 8 }}

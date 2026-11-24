@@ -30,8 +30,8 @@ test('the built bundle imports only the host SDK, react and lucide', () => {
   const specifiers = [...built.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]).sort()
   assert.deepEqual([...new Set(specifiers)], ['@kirocrew/app-sdk', '@kirocrew/app-sdk/ui', 'lucide-react', 'react', 'react/jsx-runtime'])
   assert.ok(!/callTool|\/api\/mcp|mcp\/call/.test(built), 'no invented MCP-call method or route')
-  assert.equal((built.match(/\bfetch\(/g) || []).length, 1, 'one fetch: the probe of the packaged console')
-  assert.ok(built.includes('"/apps/causelens/ui/console.html"'))
+  assert.equal((built.match(/\bfetch\(/g) || []).length, 0, 'no fetch: the console is bundled, not loaded by URL')
+  assert.ok(!built.includes('/apps/causelens/ui/console.html'), 'Crew 0.13.1 refuses .html on the app asset route')
 })
 
 test('the page mounts a native ChatEmbed for the selected agent, defaulting to the Detective', () => {
@@ -45,11 +45,25 @@ test('the page mounts a native ChatEmbed for the selected agent, defaulting to t
   assert.equal((html.match(/role="tab"/g) || []).length, 3)
 })
 
-test('the static console is labelled and is not shown before it is found', () => {
+test('the static console is labelled and shown from the bundle through a sandboxed srcDoc iframe', () => {
   assert.match(text, /Static reference result\./)
   assert.match(text, /not the output of a native Crew agent or of a hosted model/)
-  assert.match(text, /Loading the reference console/)  // the first render, before the probe answers
-  assert.ok(!html.includes('<iframe'))
+  const frames = [...html.matchAll(/<iframe([^>]*)>/g)].map((m) => m[1])
+  assert.equal(frames.length, 1)
+  assert.match(frames[0], /sandbox=""/)
+  assert.ok(!/\ssrc=/.test(frames[0]), 'no src URL')
+  const srcdoc = frames[0].match(/srcDoc="([^"]*)"/i)[1]
+    .replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&')
+  assert.equal(srcdoc, readFileSync(join(ui, 'console.html'), 'utf8'), 'the frame holds the packaged console unchanged')
+})
+
+test('the bundled console keeps its provenance links', () => {
+  const consoleHtml = readFileSync(join(ui, 'console.html'), 'utf8')
+  const links = new Set([...consoleHtml.matchAll(/href="#(call-\d+)"/g)].map((m) => m[1]))
+  const targets = new Set([...consoleHtml.matchAll(/id="(call-\d+)"/g)].map((m) => m[1]))
+  assert.ok(links.size >= 10, 'source links present')
+  for (const l of links) assert.ok(targets.has(l), `link #${l} has a target`)
+  assert.ok(!/<script/i.test(consoleHtml), 'no script in the console')
 })
 
 test('the page states no finding of its own', () => {

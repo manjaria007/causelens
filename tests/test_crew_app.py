@@ -253,7 +253,9 @@ def test_the_page_labels_the_static_console_and_does_not_present_it_as_agent_out
     model = (APP / "ui" / "src" / "model.ts").read_text()
     page = (APP / "ui" / "src" / "App.tsx").read_text()
     assert "Static reference result" in model and "not the output of a native Crew agent" in model
-    assert "/apps/causelens/ui/console.html" in model and 'sandbox=""' in page and "STATIC_LABEL" in page
+    assert "import consoleHtml from '../console.html?raw'" in page and "srcDoc={state.html}" in page and 'sandbox=""' in page
+    assert "/apps/causelens/ui/console.html" not in model + page  # Crew 0.13.1's asset route answers 403 for .html
+    assert "STATIC_LABEL" in page
     for source in (model, page):
         assert "callTool" not in source and "/api/mcp" not in source  # no invented SDK method or route
     for name in ("causelens-detective", "causelens-scientist", "causelens-experiment-designer"):
@@ -263,6 +265,7 @@ def test_the_page_labels_the_static_console_and_does_not_present_it_as_agent_out
 def test_the_built_page_matches_the_source_imports():
     built = (APP / "ui" / "dist" / "index.mjs").read_text()
     assert 'from "@kirocrew/app-sdk"' in built and "ChatEmbed" in built and "useChatLauncher" in built and "Static reference result" in built
+    assert "srcDoc" in built and "CauseLens investigation" in built and 'href="#call-1"' in built  # the console is inlined in the bundle
     assert "export {" in built and "default" in built
     assert MANIFEST["permissions"]["api"] == ["/api/chat"]  # the chat embed's documented grant, nothing else
 
@@ -290,9 +293,11 @@ NODE = shutil.which("node")
 def test_the_ui_node_tests_pass():
     """Runs crew/causelens/ui/test/: unit tests of src/model.ts and a render of the BUILT page against stub host modules (test/stubs/).
     The stubs record what the page asks the host for; nothing here runs Crew, an agent or MCP."""
-    out = subprocess.run([NODE, "--test", "test/"], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=120)
+    files = ["test/model.test.mjs", "test/page.test.mjs"]  # explicit names: Node 24 does not expand a directory argument to --test
+    assert json.loads((APP / "ui" / "package.json").read_text())["scripts"]["test"] == "node --test " + " ".join(files)
+    out = subprocess.run([NODE, "--test", *files], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
-    assert re.search(r"# pass 7|pass 7", out.stdout) and "fail 0" in out.stdout
+    assert re.search(r"\bpass 8\b", out.stdout) and re.search(r"\bfail 0\b", out.stdout)
 
 
 def test_the_built_bundle_is_current_with_its_source():

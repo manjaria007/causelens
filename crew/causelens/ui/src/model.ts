@@ -51,22 +51,17 @@ export function slotKeyFor(key: AgentKey): string {
   return `causelens-${key}`
 }
 
-/** The static console is a file inside this app, served from the app's UI route. */
-export const CONSOLE_URL = '/apps/causelens/ui/console.html'
+/**
+ * The static console is bundled into the page at build time (Vite `?raw` import of ../console.html) and shown through a sandboxed iframe's
+ * `srcDoc`. Crew 0.13.1's app asset route refuses `.html` (HTTP 403), so the file cannot be loaded by URL.
+ */
+export type ConsoleState = { kind: 'ready'; html: string } | { kind: 'missing'; detail: string }
 
-export type ConsoleState =
-  | { kind: 'checking' }
-  | { kind: 'ready' }
-  | { kind: 'missing'; detail: string }
-
-/** Decide what the console panel shows from the result of probing CONSOLE_URL. Never falls back to any finding. */
-export function consoleStateFrom(result: { ok: boolean; status?: number; contentType?: string | null } | { error: string }): ConsoleState {
-  if ('error' in result) return { kind: 'missing', detail: `The reference console could not be loaded (${result.error}).` }
-  if (!result.ok) return { kind: 'missing', detail: `The reference console is not available in this install (HTTP ${result.status ?? 'error'}).` }
-  if (result.contentType && !result.contentType.toLowerCase().includes('text/html')) {
-    return { kind: 'missing', detail: 'The reference console file is not an HTML page.' }
-  }
-  return { kind: 'ready' }
+/** Decide what the console panel shows from the bundled text. Never falls back to any finding. */
+export function consoleStateFrom(html: string | null | undefined): ConsoleState {
+  if (!html || !html.trim()) return { kind: 'missing', detail: 'The reference console is not bundled in this build.' }
+  if (!/^\s*<!doctype html>/i.test(html)) return { kind: 'missing', detail: 'The bundled reference console is not an HTML page.' }
+  return { kind: 'ready', html }
 }
 
 export const STATIC_LABEL = 'Static reference result'

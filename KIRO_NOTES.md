@@ -1019,3 +1019,19 @@ not perform are listed under "Not done" in the final block.
   - Ruff on `causelens tests scripts crew`: passed. `package_crew_app.py --check`: up to date. Analytics, MCP rules, simulator and reference data unchanged.
 - **Deferred to after Task 4 (install and the owner's trust approval):** the page rendering inside Crew; native agents making real MCP calls (3.2); native
   insufficient-evidence and missing-data behaviour (3.3); any transcript. I did not change `agent.apps_trusted` or `agent.apps_allow_third_party`.
+
+### Task 3 review fixes (PR #13, review of `bf27bf3`)
+
+- **The console could not load inside Crew.** The reviewer observed Crew 0.13.1 answering HTTP 403 for `/apps/causelens/ui/console.html` (its app asset route
+  refuses `.html`); I had not loaded the page inside Crew, so my "probe then iframe `src`" design was untested there. The page now imports `../console.html?raw`
+  (Vite inlines the text at build time; `dist/index.mjs` is 130.46 kB, 22.72 kB gzipped) and shows it in an iframe with `srcDoc` and `sandbox=""`, no `src`, and
+  no `fetch`. The "Static reference result" label and the not-a-native-agent explanation are unchanged around the frame; if the bundled text is empty or not an
+  HTML page, an "unavailable" notice is shown instead. The console's provenance links are in-page anchors (`#call-N`): a test checks every one has its target
+  in the bundled document and that the frame holds the packaged file unchanged. Whether anchor clicks scroll inside a sandboxed `srcDoc` frame in Crew's
+  dashboard was not checked in a browser.
+- **The test command failed on Node 24.** `node --test test/` relied on directory expansion (it works on this Mac's Node 26, which is why I missed it).
+  `package.json` and the pytest wrapper now pass `test/model.test.mjs test/page.test.mjs` explicitly, and the wrapper asserts the script matches. Not run on
+  Node 24 here.
+- Focused checks: `npm run build` (after `npm ci --legacy-peer-deps`); UI tests 8 passed (stubs, not Crew); `tests/test_crew_app.py` 26 passed, including the
+  rebuild-equals-committed-bundle check; Ruff on `causelens tests scripts crew` passed; `package_crew_app.py --check` up to date.
+- Native Crew verification remains pending (Task 4 install and the owner's per-app trust prompt).

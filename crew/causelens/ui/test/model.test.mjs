@@ -1,7 +1,7 @@
 // Unit tests of src/model.ts (pure logic; no host, no Crew). Run: node --test test/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { AGENTS, DEFAULT_AGENT, CONSOLE_URL, STATIC_LABEL, STATIC_EXPLANATION, LIVE_EXPLANATION, agentFor, consoleStateFrom, slotKeyFor } from '../src/model.ts'
+import { AGENTS, DEFAULT_AGENT, STATIC_LABEL, STATIC_EXPLANATION, LIVE_EXPLANATION, agentFor, consoleStateFrom, slotKeyFor } from '../src/model.ts'
 
 test('three agents, named as registered from agents/*.json', () => {
   assert.deepEqual(AGENTS.map((a) => a.agent), ['causelens-detective', 'causelens-scientist', 'causelens-experiment-designer'])
@@ -10,14 +10,14 @@ test('three agents, named as registered from agents/*.json', () => {
   assert.equal(agentFor('nonsense').key, 'detective')
 })
 
-test('the console probe never falls back to a finding', () => {
-  assert.deepEqual(consoleStateFrom({ ok: true, status: 200, contentType: 'text/html; charset=utf-8' }), { kind: 'ready' })
-  for (const r of [{ ok: false, status: 404 }, { ok: true, status: 200, contentType: 'application/json' }, { error: 'network down' }]) {
-    const s = consoleStateFrom(r)
+test('the console state never falls back to a finding', () => {
+  const html = '<!doctype html><html><body>x</body></html>'
+  assert.deepEqual(consoleStateFrom(html), { kind: 'ready', html })
+  for (const bad of ['', '   ', null, undefined, '{"not": "html"}']) {
+    const s = consoleStateFrom(bad)
     assert.equal(s.kind, 'missing')
-    assert.match(s.detail, /not available|could not be loaded|not an HTML page/)
+    assert.match(s.detail, /not bundled|not an HTML page/)
   }
-  assert.equal(CONSOLE_URL, '/apps/causelens/ui/console.html')
 })
 
 test('no text in the model states a finding', () => {
