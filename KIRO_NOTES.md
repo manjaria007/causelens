@@ -951,4 +951,35 @@ not perform are listed under "Not done" in the final block.
 - 4.2: install from Discover, the trust review, enable, `kirocrew app dev causelens`.
 - 2.3's remaining part (Crew starting the packaged server from its own install), 3.2, 3.3 and 5.1: no native Crew session has run the agents, so there is no
   transcript, Activity or export.
-- 5.3: Stop-hook baseline at the end of this block is in the final summary; whether a new block appears after this agent turn has to be checked afterwards.
+- 5.3: see the observation in the next block.
+
+### Task 1 check and Task 2 completion (next turn)
+
+- **Task 1 status, re-checked against these notes before starting Task 2.**
+  - Doctor: recorded above (exit 0, "Kiro Crew is ready!", kiro-cli sign-in, gateway not running at the time).
+  - Setup: missing until now. I backed up `~/.kiro/agents/*.json` (14 files) to `/Users/mickey/onenumber/backups/kiro-agents-20261123-191957/` and ran
+    `kirocrew setup --agent-only`: exit 0, "Agent installed: /Users/mickey/.kiro/agents/kirocrew.json". The interactive wizard steps were skipped by that flag;
+    I did not run the interactive wizard, so 1.2 stays unchecked.
+  - Fifteen tools: in this native Kiro CLI 3.5.0 session the attached `causelens` server offers exactly 15 tools (`check_data_quality`, `check_pre_trends`,
+    `confirm_change`, `daily_series`, `decompose_change`, `design_experiment`, `detect_change_point`, `estimate_did`, `list_datasets`,
+    `match_event_candidates`, `power_analysis`, `project_impact`, `run_placebo`, `test_candidates`, `test_event_scope`). A fresh attached call to
+    `daily_series` (dataset `reference`, segment mobile/safari) returned 92 points from 2026-08-01 to 2026-10-31, 2026-09-20 marked `excluded`, no missing dates,
+    and the post-review assumption text, so the attached server runs the current code. I did not reconnect the server and this is not a screenshot of the MCP
+    panel, so 1.3 stays unchecked; the panel capture is still needed.
+- **Stop hook, observed.** After my previous turn ended, `.pytest_cache/stop-hook-runs.log` grew from 48 to 51 lines with a new block:
+  `=== stop hook start 2026-11-24T00:09:03Z cwd=/Users/mickey/onenumber/causelens-cli`, `All checks passed!`, `=== stop hook end 2026-11-24T00:09:03Z ruff_exit=0`.
+  My last command of that turn ran at 2026-11-24T00:08:46Z (the baseline capture) and I did not invoke the hook command. That is a fresh automatic block after a
+  real native agent turn (spec 5.3), with the caveat that I infer the trigger from timing; I did not see the hook's own UI output.
+- **Task 2, verified again after the pull-up of Task 1.**
+  - `python scripts/package_crew_app.py --check`: up to date. `kirocrew agent validate crew/causelens/agents`: 3 specs, 0 problems. Crew's `AppManifest` loads
+    `app.json` and `validate` returns `[]`.
+  - Copy outside the repository: `git archive HEAD crew/causelens` unpacked to `/tmp/proto/outside/causelens`, started with Crew's own Python 3.12.13 and a
+    clean environment (`env -i`, only `PATH` and the scratch dependency directory). 15 tools including `daily_series`; `list_datasets` gives `reference`, 5,888
+    rows, fingerprint `7c8fe7196f23...`, 2026-08-01 to 2026-10-31; `check_data_quality` excludes `["2026-09-20"]`; `causelens` is imported from the copy's
+    `runtime/`. I then renamed the source checkout away for a few seconds and ran the same probe: identical output, so it does not reach back into the repo.
+    (While renamed, the gateway and this session's MCP server were running; I restored the name immediately and saw no error.)
+  - The analytics, MCP code, simulator, data and steering are unchanged against `origin/main` (`git diff --stat` empty). New test: the app contains no credential
+    files, key-shaped strings or `secret://` references, and no agent or server `env`.
+  - Focused checks: `tests/test_crew_app.py` (22), plus the MCP server, CLI and daily-series tests: 159 passed; Ruff passed. Not the full suite.
+  - 2.3 is checked on this basis: the packaged launcher works from a copy outside the checkout under Crew's interpreter. Crew's own registration of the server
+    (provisioning `requirements.txt` and resolving `python3 mcp_server.py` itself) can only be observed after install, which is Task 4.

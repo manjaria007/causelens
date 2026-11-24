@@ -261,3 +261,16 @@ def test_the_built_page_matches_the_source_imports():
     assert 'from "@kirocrew/app-sdk"' in built and "ChatEmbed" in built and "Static reference result" in built
     assert "export {" in built and "default" in built
     assert MANIFEST["permissions"]["api"] == ["/api/chat"]  # the chat embed's documented grant, nothing else
+
+
+def test_the_app_contains_no_credentials():
+    names = {p.name.lower() for p in app_files()}
+    assert not names & {".env", ".npmrc", ".pypirc", "credentials", "credentials.json", "id_rsa", ".netrc"}
+    secret = re.compile(r"AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|xox[abpr]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|secret://")
+    for path in app_files():
+        if path.suffix in TEXT_SUFFIXES:
+            hit = secret.search(path.read_text(errors="ignore"))
+            assert hit is None, (path, hit and hit.group(0)[:8])
+    for spec in (APP / "agents").glob("*.json"):
+        assert "env" not in json.loads(spec.read_text())
+    assert "env" not in MANIFEST["mcpServers"]["causelens"]

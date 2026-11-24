@@ -9,7 +9,7 @@ All boxes start unchecked: cloud preparation is not native Kiro/Crew proof. Run 
 - [ ] 2. Build and validate the installable app
   - [x] 2.1 Scaffold `crew/causelens/` and validate the manifest against installed Crew
   - [x] 2.2 Add three native agent definitions and app-contained prompts generated from scientist rules
-  - [ ] 2.3 Package the MCP runtime/data and validate its supported relative launcher from a copied app install
+  - [x] 2.3 Package the MCP runtime/data and validate its supported relative launcher from a copied app install
 - [ ] 3. Integrate the console and native investigation
   - [ ] 3.1 Add the Crew UI page using the supported mount/SDK contract
   - [ ] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence
