@@ -1073,3 +1073,51 @@ not perform are listed under "Not done" in the final block.
   - The token was used only in the browser session; it is not in the screenshots or these notes.
 - **Stopped here for the owner.** I did not press Install: the app-specific trust prompt it opens is the owner's to review and accept or refuse. Task 4.1 is
   observed; 4.2, the in-dashboard checks of the page, 3.2, 3.3 and Task 5 wait on that decision.
+
+### Task 4 completed, page checked inside Crew, first native agent run (3.2 partly)
+
+- **Install (owner).** The owner reviewed the per-app trust prompt and installed CauseLens from Discover. `kirocrew app info causelens` then: `enabled: true`,
+  `installedAt 2026-11-24T01:49:12Z`, `source: registry:causelens`, `sourceRegistry: causelens-dev`, `approvedGrants.api: ["/api/chat"]`. Config:
+  `agent.apps_trusted: ["causelens"]`, `apps_trusted_repositories: {"causelens": "https://github.com/manjaria007/causelens"}`, and
+  `agent.apps_allow_third_party` still `false` (no global grant). The installed tree equals `crew/causelens` (plus `installed.json` and a deps lock); Crew
+  provisioned `requirements.txt` into `data/.kirocrew-deps`; no `ground_truth` file is present.
+- **`kirocrew app dev causelens`**: "causelens is now in dev mode"; `app info` shows `dev: true`.
+- **A real bug found at registration.** The gateway log warned for all three agents: "grants MCP tool ref(s) not found in this agent's merged mcpServers ...
+  kiro-cli will silently never mount them: @causelens/list_datasets ...". Crew registers an app's server as `<app>:<server>` (`causelens:causelens`), so my refs
+  `@causelens/<tool>` dangled and the agents would have had no tools. Fixed the refs to `@causelens:causelens/<tool>` (the builtin `mochi` app uses the same
+  `@mochi:mochi` form), added a test that asks Crew's own `_unresolvable_tool_refs` with the server map Crew builds (it reported the old form as dangling),
+  bumped the app to 0.1.1 and ran `kirocrew app update causelens`: "updated causelens v0.1.0 -> v0.1.1 ... Agents registered: 3, Skills registered: 1",
+  `sourceCommit 60a3b41`, no new warnings. The rendered agents (`~/.kiro/agents/causelens--causelens-*.json`) carry server `causelens:causelens`, launched as
+  Crew's Python 3.12 with `deps_boot.py <app>/data/.kirocrew-deps <app>/mcp_server.py`.
+- **The page inside the real Crew dashboard** (headless Chrome, owner session; `docs/crew-evidence/03-*.png` to `05-*.png`, `pagecheck.json`):
+  - `/apps/causelens` renders the CauseLens header, "Investigate with the native agents" and "Reference console (static reference result)" with the full
+    "Static reference result. ... not the output of a native Crew agent or of a hosted model" text. No error or "unavailable" notice.
+  - Three tabs: Detective (selected by default), Scientist, Experiment designer. Clicking each selected it and showed its registered name
+    (`causelens-detective`, `causelens-scientist`, `causelens-experiment-designer`) in the role line and the chat embed header.
+  - One iframe: `sandbox=""`, no `src`, `srcdoc` of 128,544 characters. It attached as an out-of-process `about:srcdoc` frame.
+  - Link click (real mouse event) on the visible `about:srcdoc#call-8`: frame `scrollY` 0 -> 9501, the target's top 10068 -> 567 in a 917 px frame (in view);
+    URL `about:srcdoc#call-8`; title still "CauseLens investigation". The frame made no request after the click. The parent dashboard made three requests in that
+    window (`/api/apps`, `/api/instances` twice), which I take to be its own polling; I did not prove they are unrelated to the click.
+- **Native run, Detective** (typed into the page's `ChatEmbed` and sent with Enter in the real dashboard at 2026-11-24T01:57:39Z; transcript read back through
+  `GET /api/chat/slots/causelens-detective`, saved as `docs/crew-evidence/slot-causelens-detective.json` with the device name redacted; screenshot
+  `06-detective-native-transcript.png`):
+  - Turn 1: the agent tried `load_resource` for `tool::causelens::list_datasets` and was told it was not in the catalogue. It answered that the CauseLens tools
+    were still starting, ran nothing and gave no numbers. (I do not know whether the server was still starting or the tool id was wrong.)
+  - Turn 2 ("Try the investigation again now"): real MCP calls, visible as tool rows: `list_datasets`, `check_data_quality`, `daily_series`,
+    `detect_change_point`, `confirm_change`, `match_event_candidates` (twice), `decompose_change`. Its report quotes the tools: 2026-09-20 excluded with 7 flags
+    and "Analytics tag deploy" called a coincidence; best onset 2026-10-15, plausible 2026-10-14 to 2026-10-15; 3.249% -> 3.064% on 73 and 18 days and
+    3,119,066 and 800,474 sessions; -0.184 pp (95% CI -0.252 to -0.114), -5.7% (-7.8% to -3.5%); 71 BH-controlled tests. These match the tool results.
+  - **Failure 1, `match_event_candidates`:** both calls were refused with "segment: Field required; exclusions.missing_dates: Field required;
+    exclusions.truncated_baseline_dates: Field required". In the logged input those keys are absent; in the tool's output they were `{}` and `[]`. The agent
+    says it sent them as empty values. So the empty containers were lost between the model and the server, and the strict prior-result validation then refuses
+    the copy. No event list was produced.
+  - **Failure 2, `decompose_change`:** the result (245,914 characters as the client reported it) exceeded the client's 30,000-character tool-output limit; the
+    agent saw only a preview and has no file tool. It reported only the mobile Safari row it could see (-0.658 pp, 95% CI -0.739 to -0.577, q 8.92e-16) and
+    said it did not see the tool's chosen segment, share of change or `remaining_share_of_change` and would not guess them. Measured locally: the default
+    decomposition is 157 kB of JSON; with `dimensions` device and browser only it is 38 kB, still over the limit.
+  - It labelled "Evidence strength: weak for any cause" itself. No tool returned that label in this run (the Detective has no tool that assesses strength), so
+    this does not follow the prompt's "state the evidence strength exactly as the tool reports it". It made no causal claim.
+- **Not done yet:** Scientist and Experiment designer runs, the insufficient-evidence and missing-data runs (3.3), the UI transcript export (I read the
+  transcript through the API instead; that is not the session menu's Export), and the Kiro MCP-panel screenshot (5.2). The two failures above have to be fixed
+  first for a complete 3.2; both need a decision (below).
+- **Stop hook (5.3).** Fresh automatic blocks keep appearing after my turns (latest observed `2026-11-24T01:47:11Z ... ruff_exit=0`, 66 lines); 5.3 is checked.

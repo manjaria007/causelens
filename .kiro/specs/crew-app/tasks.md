@@ -11,14 +11,14 @@ All boxes start unchecked: cloud preparation is not native Kiro/Crew proof. Run 
   - [x] 2.2 Add three native agent definitions and app-contained prompts generated from scientist rules
   - [x] 2.3 Package the MCP runtime/data and validate its supported relative launcher from a copied app install
 - [ ] 3. Integrate the console and native investigation
-  - [x] 3.1 Add the Crew UI page using the supported mount/SDK contract (built and tested against stub host modules; rendering inside Crew is checked after task 4)
-  - [ ] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence (pending: needs the task 4 install and the owner's trust approval)
+  - [x] 3.1 Add the Crew UI page using the supported mount/SDK contract (verified inside the installed Crew dashboard: three agent tabs, static label, srcdoc link navigation)
+  - [ ] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence (partly observed: a native Detective run made real MCP calls and quoted their values, but match_event_candidates failed and decompose_change output was truncated; see KIRO_NOTES)
   - [ ] 3.3 Exercise insufficient-evidence and missing-data behavior without fixed reference claims (tool-level checks done locally; native agent behaviour pending task 4)
-- [ ] 4. Install and enable in Crew
-  - [ ] 4.1 Configure the documented opt-in registry and verify CauseLens appears in Apps → Discover
-  - [ ] 4.2 Install from Discover, review trust, enable, and run `kirocrew app dev causelens`
+- [x] 4. Install and enable in Crew
+  - [x] 4.1 Configure the documented opt-in registry and verify CauseLens appears in Apps → Discover
+  - [x] 4.2 Install from Discover, review trust, enable, and run `kirocrew app dev causelens`
 - [ ] 5. Capture genuine proof
   - [ ] 5.1 Run the reference question in Crew; capture Activity and export the parent/child transcript
   - [ ] 5.2 Capture a native MCP screenshot showing fifteen tools
-  - [ ] 5.3 Observe a fresh automatic Stop-hook log block after a real native agent turn
+  - [x] 5.3 Observe a fresh automatic Stop-hook log block after a real native agent turn
   - [ ] 5.4 Update `KIRO_NOTES.md`, run required final checks once, and open a reviewable PR

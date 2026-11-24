@@ -1,0 +1,97 @@
+{
+ "url": "/apps/causelens",
+ "tabs": [
+  {
+   "text": "Detective",
+   "selected": "true"
+  },
+  {
+   "text": "Scientist",
+   "selected": "false"
+  },
+  {
+   "text": "Experiment designer",
+   "selected": "false"
+  }
+ ],
+ "tabResults": [
+  {
+   "selected": "Detective",
+   "roleLine": "causelens-detective",
+   "embedHeaderHasAgent": true
+  },
+  {
+   "selected": "Scientist",
+   "roleLine": "causelens-scientist",
+   "embedHeaderHasAgent": true
+  },
+  {
+   "selected": "Experiment designer",
+   "roleLine": "causelens-experiment-designer",
+   "embedHeaderHasAgent": true
+  }
+ ],
+ "iframes": [
+  {
+   "title": "CauseLens reference console (static reference result)",
+   "sandbox": "",
+   "hasSrc": false,
+   "srcdocLen": 128544
+  }
+ ],
+ "frameTargets": [
+  "about:srcdoc"
+ ],
+ "before": {
+  "x": 405.0703125,
+  "y": 74.625,
+  "href": "about:srcdoc#call-8",
+  "id": "call-8",
+  "scrollY": 0,
+  "targetTop": 10068.375,
+  "title": "CauseLens investigation",
+  "url": "about:srcdoc",
+  "height": 917
+ },
+ "after": {
+  "url": "about:srcdoc#call-8",
+  "title": "CauseLens investigation",
+  "scrollY": 9501,
+  "targetTop": 567.375,
+  "height": 917
+ },
+ "requestsAfterClick": [
+  {
+   "t": 1795485378663,
+   "url": "http://localhost:5476/api/apps",
+   "session": "page"
+  },
+  {
+   "t": 1795485378663,
+   "url": "http://localhost:5476/api/instances",
+   "session": "page"
+  },
+  {
+   "t": 1795485379675,
+   "url": "http://localhost:5476/api/instances",
+   "session": "page"
+  }
+ ],
+ "allRequestsAfterClick": [
+  {
+   "t": 1795485378663,
+   "url": "http://localhost:5476/api/apps",
+   "session": "page"
+  },
+  {
+   "t": 1795485378663,
+   "url": "http://localhost:5476/api/instances",
+   "session": "page"
+  },
+  {
+   "t": 1795485379675,
+   "url": "http://localhost:5476/api/instances",
+   "session": "page"
+  }
+ ]
+}
