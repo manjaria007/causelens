@@ -1057,3 +1057,19 @@ not perform are listed under "Not done" in the final block.
   Chrome processes. The pytest wrapper now reports partial output if the Node tests ever exceed 150 s.
 - Focused checks: UI tests 10 passed (8 stub/unit, 2 browser); `tests/test_crew_app.py` 26 passed (three runs); Ruff on `causelens tests scripts crew` passed;
   `package_crew_app.py --check` up to date. Native Crew verification (the page and its links inside the Crew dashboard) is still pending Task 4.
+
+### Task 4: Discover listing in the real dashboard (before the trust review)
+
+- Gateway: `kirocrew status` showed Crew v0.13.1 up 1h 37m (the gateway I started in the background earlier). `agent.apps_trusted` is `[]` and
+  `agent.apps_allow_third_party` is `false`; I did not change them.
+- `POST /api/apps/registries/refresh` (owner session): `{"ok": true, "refreshed": ["causelens-dev"], ...}` at 2026-11-24T01:43:23Z. `GET /api/apps/registry`:
+  CauseLens 0.1.0 from `causelens-dev`, branch `crew-app`, subdirectory `crew/causelens`, `installed: false`, `provenance: external`, `verified: false`.
+- **The Discover page itself**, rendered by headless Chrome logged in with the owner's dashboard token (the real dashboard at `localhost:5476`, not a mock;
+  screenshots in `docs/crew-evidence/`):
+  - `01-apps-discover.png`: Apps → Discover, with "causelens-dev 1 app" under Sources.
+  - `02-discover-causelens-detail.png`: after choosing that source, `/apps/detail/causelens`: "CauseLens, manjaria007 · v0.1.0, Source causelens-dev",
+    an **Install** button, the description, Permissions "API ACCESS /api/chat", MCP Servers "causelens python3", the tags and the repository link. The
+    Contributors box shows an unrelated error (the gateway has no `gh` CLI).
+  - The token was used only in the browser session; it is not in the screenshots or these notes.
+- **Stopped here for the owner.** I did not press Install: the app-specific trust prompt it opens is the owner's to review and accept or refuse. Task 4.1 is
+  observed; 4.2, the in-dashboard checks of the page, 3.2, 3.3 and Task 5 wait on that decision.
