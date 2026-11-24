@@ -1121,3 +1121,60 @@ not perform are listed under "Not done" in the final block.
   transcript through the API instead; that is not the session menu's Export), and the Kiro MCP-panel screenshot (5.2). The two failures above have to be fixed
   first for a complete 3.2; both need a decision (below).
 - **Stop hook (5.3).** Fresh automatic blocks keep appearing after my turns (latest observed `2026-11-24T01:47:11Z ... ruff_exit=0`, 66 lines); 5.3 is checked.
+
+### Fixes from the first native run, and the native runs repeated (app 0.1.2)
+
+- **1. `match_event_candidates` input repair (three fields only).** `causelens/mcp/models.py` `restore_known_change_point_omissions`: inside the change
+  point given to `match_event_candidates`, `segment` is restored to `{}` and `exclusions.missing_dates` / `exclusions.truncated_baseline_dates` to `[]`, each
+  only when its key is absent. Supplied values are kept; an explicit `null`, a wrong type, a missing core field (`status`, `plausible_dates`, `exclusions`
+  itself, `exclusions.applied`) is still refused by the same strict validation. No other prior result gets any restoration (a quality report missing
+  `missing_dates` is still refused, tested). **Limitation:** `match_event_candidates` does not recompute the change point, so a copied change point that was
+  *edited* (rather than shortened) is used as given; this was already true and the repair does not change it. The published input schema still lists the
+  three fields as required.
+- **2. `decompose_change(..., detail="summary")`.** New `causelens/analytics/decompose_summary.py` (`DecompositionSummary`, `summarize_decomposition`): a
+  projection that copies, never computes. It carries the windows, the settings used, exclusions, assumptions, the localization with each selected segment's
+  structured labels and full effect record (interval, sessions, FDR-adjusted q), the FDR family and test counts, the localized partition's remainder with the
+  selected set verbatim (`remaining_share_of_change` -0.0807 on the reference data, negative and unchanged), up to three next-ranked segments, the reasons per
+  partition when nothing is localized, and `detail: "summary"` with a note that it is not a decomposition. `"full"` stays the default and its structured
+  content equals the analytics result exactly (tested). The SDK wraps a union return in `{"result": ...}`, which would have changed the full response, so the
+  tool returns a root model whose published schema is `{"type": "object", "properties": <fields both share>, "anyOf": [full, summary]}`;
+  `test_mcp_server` was adjusted for that one tool. Sizes through the SDK client on the reference data: full text 245,914 characters; summary text 12,880
+  (structured JSON 10,988). A summary passed as `decomposition` to `test_candidates` is refused (tested); called without one, `test_candidates` recomputes.
+- **3. Detective strength wording.** The summary includes a fixed `causal_attribution`: `strength: "insufficient"`, reason "insufficient for a causal
+  attribution: a decomposition describes where the change is concentrated, not why; no identification design ... and no candidate test has run in this
+  call", `checks_run: []`. The Detective prompt now quotes it word for word; each role's report names where its strength comes from (Scientist:
+  `test_candidates` `evidence.strength`; Experiment designer: `design_experiment` `evidence_strength`).
+- **Verification before the native retry.** `tests/test_mcp_crew_fixes.py` (22): the exact change point the native Detective sent (read from the preserved
+  transcript) omits exactly those three fields and is now accepted with output identical to the complete change point; 11 strict rejection cases; supplied
+  values kept and nothing invented; no restoration for other prior results; summary equals full field by field; summary text under 15,000 and JSON under
+  12,000; the fixed attribution; summary refused as a decomposition; a no-localization case carries `localization_note` and per-partition reasons; settings
+  echo the arguments. Six mutations (no restore, overwrite, invent `exclusions`, recompute a remainder, flip the default, change the strength) were all caught.
+  Focused suites: MCP server, review, CLI, datasets, crew app, agents, eval, console: 525 passed after one test fix (the runtime-import check now parses
+  imports with `ast`; a docstring line starting "from it" had matched). Ruff passed. The packaged runtime was regenerated; app 0.1.2 pushed (`781e4a0`) and
+  `kirocrew app update causelens`: "updated causelens v0.1.1 -> v0.1.2 ... Agents registered: 3"; installed tree equals the source; no new registration
+  warnings.
+- **Native runs, fresh sessions** (new slots started with `POST /api/chat`, the endpoint the page's embed sends to, with the agent named; transcripts read back
+  and saved under `docs/crew-evidence/runs-0.1.2/`; the failed 0.1.1 transcript is kept as history):
+  - **Detective, reference data** (02:20:54Z, 28 s): `list_datasets`, `check_data_quality`, `daily_series`, `detect_change_point`, `confirm_change`,
+    `match_event_candidates` (**accepted**: Checkout v4.2 and Homepage hero refresh listed as date matches only), `decompose_change` with the summary. It reported
+    the localization to device=mobile, browser=safari (-0.658 pp, 95% CI -0.739 to -0.577, 242,199 sessions after, q 8.92e-16, 71 tests), the remainder
+    (-0.0807, and 0.01397 pp not distinguishable), and quoted `causal_attribution` "insufficient" with its reason verbatim. No causal claim.
+  - **Scientist, reference data** (02:21:44Z, 28 s): `test_candidates`, `estimate_did`, `check_pre_trends`, `run_placebo`, `project_impact`. Checkout v4.2
+    supported at lag 0, Homepage hero refresh rejected as the sole cause (Holm p 0.00606) and inconclusive at lag 1, the ambiguity stated, share sets given;
+    DiD -0.680 pp (95% CI -0.774 to -0.585) on 73 and 18 days with the sessions; pre-trend and placebo pass; overall -0.206 pp, about 1,646 lost orders (1,416
+    to 1,876); the assumptions listed; strength **moderate as the tool reports it** (base strong, capped by ambiguity).
+  - **Experiment designer, reference data** (02:22:24Z, 88 s): `test_candidates` ok, then `design_experiment` **refused twice**: `exclusions.missing_dates:
+    Field required; exclusions.truncated_baseline_dates: Field required` inside `candidate_testing`. The same empty-container loss, in a prior result this round
+    did not repair (by instruction). The agent said it could not design the experiment, gave no sample size, did not call `power_analysis` because it had no
+    baseline from a tool, and quoted the test results instead. So 3.2 is not complete.
+  - **No change** (installed `data/metrics_daily.csv` swapped for a seeded no-change simulation, SHA-256 `0ea0e805...`, restored to `7c8fe719...` right after,
+    hash checked): the Detective found no change point (adjusted p = 1), `confirm_change` gave `not_distinguishable_from_noise` with the tool's data-needed
+    figures, it stopped, ran neither the event match nor the decomposition, and made no causal claim or reference finding.
+  - **Missing days** (2026-09-05 and 2026-10-20 removed, SHA-256 `eceb70b3...`, restored and checked): the Detective listed both dates as having no rows, used
+    72 and 17 days, and reported the localization and attribution as before with this data's own numbers.
+- **Numbers.** I replayed each run's logged tool inputs against the same server code and data (the tools are deterministic) and checked every number in each
+  final answer against the full replayed outputs: 31, 61, 24, 26 and 35 numbers, none unmatched. The match accepts the value rounded to the digits shown
+  (and as a percentage); with six decoy numbers added, five were flagged and one (3.141) matched by chance, so this check is indicative, not proof. The agents
+  do round for display (for example -0.0807 for -0.08066788519389068), which the prompt's "never round" does not allow; I did not change the prompts for it.
+- **Still pending:** the designer's refused input (needs a decision on `candidate_testing`, beyond the three change-point fields), a session-menu export
+  of a transcript, and the Kiro MCP-panel screenshot (5.2). Stop hook: fresh automatic block `2026-11-24T02:02:27Z ... ruff_exit=0` (69 lines).
