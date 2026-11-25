@@ -1,0 +1,71 @@
+{
+ "key": "causelens-experiment-designer-run4",
+ "title": "Checkout Conversion Experiment Design",
+ "running": false,
+ "admission_queued": false,
+ "turn": 1,
+ "turn_gen": "1142711f",
+ "stopping": false,
+ "stop_state": "idle",
+ "stop_declined": false,
+ "messages": [
+  {
+   "role": "user",
+   "content": "Design the experiment that would settle the checkout conversion question in the reference dataset. Use dataset_id reference, baseline window 2026-08-01 to 2026-10-13 and comparison window 2026-10-14 to 2026-10-31 (the windows the Detective's tools returned). Report only what your tools return.",
+   "cls": "msg msg-u",
+   "ts": "2026-11-25T16:24:01.407518+00:00",
+   "meta": {
+    "human": true,
+    "author": {
+     "id": "p_dda497926a972e1df0f48319a2c305a8",
+     "kind": "human",
+     "display": {
+      "name": "<device>",
+      "login": "",
+      "captured_at": null
+     }
+    },
+    "mid": "m-7342baf2ac6545ea"
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/design_experiment",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:24:10.456576+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_017LAiH927M4hm8F9G4uwLp2",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"pre_window\": {\n    \"start\": \"2026-08-01\",\n    \"end\": \"2026-10-13\"\n  },\n  \"post_window\": {\n    \"start\": \"2026-10-14\",\n    \"end\": \"2026-10-31\"\n  },\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"post_window\",\n      \"end\"\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"pre_window\",\n        \"start\"\n      ],\n      [\n        \"pre_window\",\n        \"end\"\n      ],\n      [\n        \"post_window\",\n        \"start\"\n      ],\n      [\n        \"post_window\",\n        \"end\"\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-eef743d722084498",
+    "done": true,
+    "output": "{\n  \"status\": \"ok\",\n  \"purpose\": \"settle\",\n  \"needs\": [],\n  \"reason\": null,\n  \"focal\": \"device=mobile, browser=safari\",\n  \"target\": [\n    \"Checkout v4.2\"\n  ],\n  \"evidence_strength\": \"moderate\",\n  \"hypothesis\": \"If Checkout v4.2 currently contributes to the conversion of device=mobile, browser=safari, then rolling it back for randomly assigned sessions would raise conversion by about 0.585 pp relative to the sessions that keep it. If the experiment did not detect a change, that does not show that the rollback has no effect: at 0.8 power an effect of the planned size can still be missed, and excluding meaningful effects needs a confidence interval or an equivalence assessment against a declared margin. This tests a release's current contribution and cannot establish that it was the sole historical cause.\",\n  \"intervention\": \"Randomly assign sessions in device=mobile, browser=safari to keep the current experience (control) or to roll back Checkout v4.2, holding every other release fixed.\",\n  \"randomization_unit\": \"session (a planning assumption: requires independent sessions and no cross-session carryover)\",\n  \"primary_metric\": \"conversion rate (orders per session) of device=mobile, browser=safari\",\n  \"guardrails\": [\n    {\n      \"name\": \"Sample-ratio mismatch (SRM)\",\n      \"kind\": \"assignment_diagnostic\",\n      \"computable_from_current_data\": false,\n      \"detail\": \"Compare the assigned arm sizes with the planned allocation. Needs the experiment's assignment logs; it cannot be computed from the metrics table.\",\n      \"reference\": null\n    },\n    {\n      \"name\": \"Conversion in traffic outside the experiment\",\n      \"kind\": \"external_monitor\",\n      \"computable_from_current_data\": true,\n      \"detail\": \"Watch conversion of the sessions that are not enrolled, as a monitor for a concurrent change. It is only meaningful while those sessions stay outside the experiment. Reference: the same days, outside the focal segment.\",\n      \"reference\": {\n        \"sessions\": 558275,\n        \"orders\": 19721,\n        \"conversion_rate\": 0.03532488468944517\n      }\n    },\n    {\n      \"name\": \"Revenue or order value per session\",\n      \"kind\": \"requires_instrumentation\",\n      \"computable_from_current_data\": false,\n      \"detail\": \"The metrics table has sessions and orders only, so value per order cannot be measured; it needs new instrumentation.\",\n      \"reference\": null\n    },\n    {\n      \"name\": \"Checkout errors and page latency\",\n      \"kind\": \"requires_instrumentation\",\n      \"computable_from_current_data\": false,\n      \"detail\": \"Not measured in the current data; it needs new instrumentation.\",\n      \"reference\": null\n    }\n  ],\n  \"mde\": {\n    \"mde_pp\": 0.5847848071580497,\n    \"per_arm\": [\n      {\n        \"event\": \"Checkout v4.2\",\n        \"mde_pp\": 0.5847848071580497,\n        \"target_rate\": 0.025699292544926797,\n        \"onset_date\": \"2026-10-14\",\n        \"observed_effect\": {\n          \"estimate\": -0.6795934588411829,\n          \"lower\": -0.7744021105243162,\n          \"upper\": -0.5847848071580497,\n          \"level\": 0.95\n        }\n      }\n    ],\n    \"source\": \"provisional_planning_heuristic\",\n    \"label\": \"provisional planning heuristic (not a business target)\",\n    \"observed_effect\": {\n      \"estimate\": -0.6795934588411829,\n      \"lower\": -0.7744021105243162,\n      \"upper\": -0.5847848071580497,\n      \"level\": 0.95\n    },\n    \"observed_for\": \"Checkout v4.2\",\n    \"caveats\": [\n      \"Reverses the sign of the 95% interval bound nearest zero (-0.774 to -0.585 pp), so a rollback is sized to undo the smallest effect the data still supports.\",\n      \"It does not correct winner's curse or selection bias: the estimate was selected because it was notable, and the true effect of a rollback can be smaller.\",\n      \"Prefer a declared business target (mde_pp).\"\n    ]\n  },\n  \"baseline\": {\n    \"rate\": 0.0198514444733463,\n    \"orders\": 4808,\n    \"sessions\": 242199,\n    \"n_days\": 18,\n    \"first_day\": \"2026-10-14\",\n    \"last_day\": \"2026-10-31\",\n    \"requested_window\": [\n      \"2026-10-14\",\n      \"2026-10-31\"\n    ],\n    \"excluded_dates\": [],\n    \"population\": \"device=mobile, browser=safari\"\n  },\n  \"traffic\": {\n    \"mean_daily_sessions\": 13455.5,\n    \"n_days\": 18,\n    \"covers_full_week\": true,\n    \"assumption\": \"traffic continues at the observed rate of 13,456 eligible sessions per day (mean of 18 usable post-period days); all eligible sessions are enrolled\"\n  },\n  \"plan\": {\n    \"arms\": [\n      {\n        \"name\": \"control (current experience retained)\",\n        \"role\": \"control\",\n        \"rollback_of\": null,\n        \"n_sessions\": 10216,\n        \"allocation_share\": 0.5,\n        \"days_to_fill\": 1.518486864107614,\n        \"mde_pp\": null,\n        \"target_rate\": null,\n        \"achieved_power\": null,\n        \"hypothesis_limit\": null\n      },\n      {\n        \"name\": \"rollback of Checkout v4.2\",\n        \"role\": \"rollback\",\n        \"rollback_of\": \"Checkout v4.2\",\n        \"n_sessions\": 10216,\n        \"allocation_share\": 0.5,\n        \"days_to_fill\": 1.518486864107614,\n        \"mde_pp\": 0.5847848071580497,\n        \"target_rate\": 0.025699292544926797,\n        \"achieved_power\": 0.8000241481307355,\n        \"hypothesis_limit\": null\n      }\n    ],\n    \"n_comparisons\": 1,\n    \"power\": {\n      \"baseline\": 0.0198514444733463,\n      \"mde_pp\": 0.5847848071580497,\n      \"target_rate\": 0.025699292544926797,\n      \"alpha\": 0.05,\n      \"n_comparisons\": 1,\n      \"alpha_per_comparison\": 0.05,\n      \"target_power\": 0.8,\n      \"allocation_ratio\": 1.0,\n      \"n_control\": 10216,\n      \"n_treatment\": 10216,\n      \"n_total_per_comparison\": 20432,\n      \"achieved_power\": 0.8000241481307355,\n      \"achieved_power_label\": \"achieved power under the normal approximation\",\n      \"previous_pair_power\": 0.799985754323313,\n      \"min_expected_count\": 202.8023567397058,\n      \"approximation_reliable\": true,\n      \"minimality\": \"exhaustive\",\n      \"warnings\": [],\n      \"assumptions\": [\n        \"Sessions are independent and identically distributed within an arm, with no carryover between sessions.\",\n        \"n is the smallest sample size that reaches the target (every smaller size was checked).\",\n        \"The test is two-sided at alpha = 0.05.\",\n        \"Power is per comparison.\",\n        \"The effect is the planning value; the true effect is unknown, and a smaller one needs a larger sample.\"\n      ],\n      \"method\": \"two-sided pooled two-proportion z-test; normal approximation\"\n    },\n    \"binding_arm\": \"Checkout v4.2\",\n    \"warnings\": [],\n    \"slowest_arm\": \"control (current experience retained)\",\n    \"duration_days\": 2,\n    \"duration_weeks\": 1,\n    \"duration_days_rounded_to_weeks\": 7\n  },\n  \"alternative_plan\": {\n    \"arms\": [\n      {\n        \"name\": \"control (current experience retained)\",\n        \"role\": \"control\",\n        \"rollback_of\": null,\n        \"n_sessions\": 12372,\n        \"allocation_share\": 0.3333333333333333,\n        \"days_to_fill\": 2.7584259224852294,\n        \"mde_pp\": null,\n        \"target_rate\": null,\n        \"achieved_power\": null,\n        \"hypothesis_limit\": null\n      },\n      {\n        \"name\": \"rollback of Homepage hero refresh\",\n        \"role\": \"rollback\",\n        \"rollback_of\": \"Homepage hero refresh\",\n        \"n_sessions\": 12372,\n        \"allocation_share\": 0.3333333333333333,\n        \"days_to_fill\": 2.7584259224852294,\n        \"mde_pp\": 0.5847848071580497,\n        \"target_rate\": 0.025699292544926797,\n        \"achieved_power\": 0.8000338460683069,\n        \"hypothesis_limit\": \"hypothesis-limited: Homepage hero refresh was rejected as the sole immediate explanation but not at lag 1 (onset 2026-10-14); this arm tests its current contribution only if it acts with a 1-day delay (lag 1)\"\n      },\n      {\n        \"name\": \"rollback of Checkout v4.2\",\n        \"role\": \"rollback\",\n        \"rollback_of\": \"Checkout v4.2\",\n        \"n_sessions\": 12372,\n        \"allocation_share\": 0.3333333333333333,\n        \"days_to_fill\": 2.7584259224852294,\n        \"mde_pp\": 0.5847848071580497,\n        \"target_rate\": 0.025699292544926797,\n   "
+   }
+  },
+  {
+   "role": "assistant",
+   "content": "**Hypothesis (tool's words):** \"If Checkout v4.2 currently contributes to the conversion of device=mobile, browser=safari, then rolling it back for randomly assigned sessions would raise conversion by about 0.585 pp relative to the sessions that keep it. If the experiment did not detect a change, that does not show that the rollback has no effect: at 0.8 power an effect of the planned size can still be missed, and excluding meaningful effects needs a confidence interval or an equivalence assessment against a declared margin. This tests a release's current contribution and cannot establish that it was the sole historical cause.\"\n\nPurpose: `settle`. Evidence strength: `moderate`.\n\n| Item | From the tool |\n|---|---|\n| Test | Random sessions in device=mobile, browser=safari keep v4.2 (control) or roll it back. Other releases stay fixed. |\n| Random unit | Session. This is a planning assumption: it needs independent sessions and no carryover. |\n| Main metric | Orders per session in device=mobile, browser=safari |\n| Baseline | 0.0198514444733463 (4,808 orders, 242,199 sessions, 2026-10-14 to 2026-10-31) |\n| Smallest effect | 0.5847848071580497 pp. This is a \"provisional planning heuristic (not a business target)\". |\n| Sessions per arm | 10,216 control and 10,216 rollback |\n| Power | 0.8000241481307355 at alpha 0.05 |\n| Time | About 2 days to fill. Plan 7 days (1 week). |\n\n**Guardrails**\n- Sample-ratio mismatch: needs the experiment's assignment logs.\n- Conversion outside the test: 0.03532488468944517 (19,721 orders, 558,275 sessions).\n- Revenue per session: needs new instrumentation.\n- Checkout errors and latency: need new instrumentation.\n\n**Warning:** \"the minimum detectable effect is a provisional planning heuristic, not a business target\"\n\n**Where the effect size comes from**\n- It is the edge of the 95% interval nearest zero: -0.774 to -0.585 pp.\n- The interval is the difference-in-differences effect for Checkout v4.2. Its estimate is -0.6795934588411829.\n- Winner's curse and selection bias are not corrected. A real rollback effect may be smaller, and a smaller one needs more sessions.\n\n**Other option from the tool:** two rollback arms (Checkout v4.2 and Homepage hero refresh) share one control.\n- Each arm has 12,372 sessions. Alpha is 0.025 per comparison. Plan 7 days.\n- The hero arm is \"hypothesis-limited\". The hero refresh was rejected as the sole immediate explanation, but not at lag 1.\n\n**Assumptions**\n- The data has no visitor ids, so session independence is not established.\n- Traffic stays at 13,456 eligible sessions per day.\n- The rollback tests current contribution only. It does not show the sole historical cause.\n\n**Not established:** the cause of the drop. A business target for the smallest effect, and independence of sessions.\n\n**Tool called:** `design_experiment` (small-input mode, no extra settings).",
+   "cls": "msg msg-a",
+   "ts": "2026-11-25T16:24:17.522268+00:00",
+   "meta": {
+    "mid": "m-75d4ff7f18fd4650",
+    "turn_stats": {
+     "elapsed_ms": 16112,
+     "credits": 0.3432,
+     "model": "auto",
+     "ttft_ms": 14225
+    }
+   }
+  }
+ ],
+ "queue": [],
+ "total": 3,
+ "has_more": false,
+ "next_before": 0,
+ "context_pct": 3.6463,
+ "context_stale": false,
+ "context_window_tokens": 1000000,
+ "context_used_tokens": 36463
+}

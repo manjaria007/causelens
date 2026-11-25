@@ -1210,3 +1210,46 @@ not perform are listed under "Not done" in the final block.
   "settle which release hurt conversion", which presumes a release caused the drop; the tool's own hypothesis is conditional.
 - **Task status.** 3.2 and parent 3 are checked. Still open: 5.1's session-menu export of a transcript and 5.2's Kiro MCP-panel screenshot, both owner
   actions in the UI. Stop hook: latest automatic block in the log is shown in the final summary.
+
+### Prompt wording: hypothesis first, exact numbers, segment change vs DiD, noise wording (apps 0.1.4 to 0.1.6)
+
+- **0.1.4 (`e843a5e`).** The generated prompts (`scripts/package_crew_app.py`) now say: write a number exactly as in the tool's JSON or inside a tool
+  display string quoted verbatim, with no rounding, shortening, percent conversion or added thousands separators; name every effect as either the
+  segment's own before/after change (`confirm_change`, decomposition) or the difference-in-differences effect (`estimate_did`, a candidate's
+  `differential_effect`), with its source tool; describe a nonsignificant result as "not distinguishable from noise" and never as "no change", "no effect" or
+  "no real change". The Designer opens with the tool's `hypothesis`, quoted verbatim; "settle which release hurt conversion" is gone. Test:
+  `test_the_prompts_carry_the_number_effect_and_noise_rules`.
+- **Number check made strict.** My replay checker's `--exact` mode used a substring match, so a truncated number passed (`0.0151110636` is a prefix of the
+  JSON value). It now requires a whole-token match against the replayed tool JSON and tool text. On the 0.1.4 runs it flagged: Detective `242,199`;
+  Designer `19,721`, `558,275`, `12,372` (separators the agent added); no-change Detective `0.0151110636`, `0.0422313702` (truncated). The Scientist run
+  had none. The no-change answer also said "has no change the tools can tell from noise", a paraphrase of "no change".
+- **0.1.5 (`3ee4f4a`).** Prompt adds "Copy every digit" with the truncation example, "`242199`, not `242,199`" (a comma only inside a quoted tool
+  display string), and forbids paraphrases of "no change". Fresh runs: all numbers matched whole-token in the three reference runs and the no-change run.
+  But the no-change answer added "Earlier runs: Past sessions found a drop starting 2026-10-14 using different windows", which no tool in that session
+  returned.
+- **Cause: Crew memory carries over between sessions.** Crew consolidates each finished dashboard session into the shared default memory store
+  (`~/.kiro/crew/memory.db`) and those memories reach later sessions. I found 17 CauseLens records there (episodic memories from the 0.1.2 runs, written
+  2026-11-24T04:01Z to 04:26Z, and semantic facts from the 0.1.3 Designer run, 2026-11-25T05:01Z), written with rounded, comma-formatted numbers such as
+  "1,646 lost orders" and "10,216 sessions per arm". So a "fresh session" here is a new slot, not a clean context: the 0.1.3 Designer run and the 0.1.4
+  and 0.1.5 runs may have seen them, and the added separators plausibly came from there (not shown). The 0.1.2 runs predate the first consolidation.
+  I did not delete the memories or change Crew's memory settings; that is the owner's state.
+- **0.1.6 (`90ee15a`).** Prompt adds "Only this conversation's tool results count": ignore memories or summaries of earlier sessions and never quote, compare with or
+  mention one. Focused checks: `tests/test_crew_app.py` and `tests/test_mcp_crew_fixes.py` 59 passed; `package_crew_app.py --check` up to date;
+  `kirocrew app update causelens` registered 3 agents; the installed prompts carry the rule.
+- **Fresh native runs on 0.1.6** (`POST /api/chat`, new slots, read back with `GET /api/chat/slots/<slot>`; saved in
+  `docs/crew-evidence/runs-0.1.6/`):
+  - Detective, reference: 24 numbers, all whole-token matches. It separates the whole-site change (-0.1841951235809724 pp) from mobile Safari's own
+    before/after change (-0.6576518919737058 pp), quotes `causal_attribution` `insufficient` with the tool's reason, and calls the two events date
+    coincidences.
+  - Scientist, reference: 39 numbers, all matched. It labels the segment change as "not the DiD effect", gives the DiD effect -0.6795934588411829 pp
+    (95% CI -0.7744021105243162 to -0.5847848071580497) with its assumptions and checks, and `moderate` with the tool's ambiguity cap.
+  - Designer, reference: 30 numbers, all matched. It opens with the tool's hypothesis verbatim. Its one comma-formatted number, "13,456 eligible sessions a
+    day", is from the tool's own `assumption` string.
+  - Detective, no-change data (swapped in, SHA-256 `0ea0e805...`, restored to `7c8fe719...` and hash-checked): 19 numbers, all matched, untruncated
+    (`0.01511106364801367`). It says "did not find a change ... that is distinguishable from noise", stops after `confirm_change`, and does not mention
+    earlier sessions.
+  - The 0.1.4 and 0.1.5 transcripts are kept as history in `runs-0.1.4/` and `runs-0.1.5/`.
+- **Limits.** The memory rule is a prompt instruction; the memories are still delivered, and one clean run does not show the agent will always ignore them.
+  The missing-day case was not re-run on 0.1.4 to 0.1.6 (prompt-only changes; its 0.1.2 run stands).
+- **Checks after the final code change (0.1.6):** full suite once, 1,402 passed (250 s); Ruff passed; `package_crew_app.py --check` up to date.
+  Still open: 5.1's session-menu export and 5.2's Kiro MCP-panel screenshot (owner actions in the UI), then 5.4.

@@ -15,3 +15,9 @@ Tool outputs inside a transcript are stored by Crew truncated to 8,000 character
 | `runs-0.1.2/detective-nochange.json` | Fresh Detective session with the installed data swapped for a no-change simulation, then restored |
 | `runs-0.1.2/detective-missingdays.json` | Fresh Detective session with two days removed from the installed data, then restored |
 | `runs-0.1.2/experiment-designer-run3-app-0.1.3.json` | Fresh Experiment designer session on app 0.1.3, small-input `design_experiment` |
+| `runs-0.1.4/*.json` | History: fresh sessions on app 0.1.4 (Detective run3, Scientist run3, Designer run4, no-change Detective). Added thousands separators and two truncated numbers; see KIRO_NOTES |
+| `runs-0.1.5/*.json` | History: fresh sessions on app 0.1.5. Numbers exact, but the no-change answer cited "past sessions" from Crew's carried-over memory |
+| `runs-0.1.6/*.json` | Current: fresh sessions on app 0.1.6 (Detective run5, Scientist run5, Designer run6, no-change Detective with the data swapped and restored). Every number matches a replayed tool output as a whole token |
+
+A new slot is not a clean context: Crew consolidates finished sessions into its shared memory store and later sessions can see those memories.
+Runs from the 0.1.3 Designer run onward may have seen memories of earlier runs. The 0.1.6 prompts tell the agents to ignore them.
