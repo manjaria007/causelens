@@ -10,9 +10,9 @@ All boxes start unchecked: cloud preparation is not native Kiro/Crew proof. Run 
   - [x] 2.1 Scaffold `crew/causelens/` and validate the manifest against installed Crew
   - [x] 2.2 Add three native agent definitions and app-contained prompts generated from scientist rules
   - [x] 2.3 Package the MCP runtime/data and validate its supported relative launcher from a copied app install
-- [ ] 3. Integrate the console and native investigation
+- [x] 3. Integrate the console and native investigation
   - [x] 3.1 Add the Crew UI page using the supported mount/SDK contract (verified inside the installed Crew dashboard: three agent tabs, static label, srcdoc link navigation)
-  - [ ] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence (Detective and Scientist observed on app 0.1.2; the Experiment designer's design_experiment input is still refused, see KIRO_NOTES)
+  - [x] 3.2 Verify native agents make real MCP calls and preserve all qualified numerical evidence (Detective and Scientist on app 0.1.2, Experiment designer on 0.1.3)
   - [x] 3.3 Exercise insufficient-evidence and missing-data behavior without fixed reference claims (native Detective sessions on a no-change and a missing-day dataset)
 - [x] 4. Install and enable in Crew
   - [x] 4.1 Configure the documented opt-in registry and verify CauseLens appears in Apps → Discover

@@ -14,3 +14,4 @@ Tool outputs inside a transcript are stored by Crew truncated to 8,000 character
 | `runs-0.1.2/experiment-designer-run2.json` | Fresh Experiment designer session (its `design_experiment` call was refused; see KIRO_NOTES) |
 | `runs-0.1.2/detective-nochange.json` | Fresh Detective session with the installed data swapped for a no-change simulation, then restored |
 | `runs-0.1.2/detective-missingdays.json` | Fresh Detective session with two days removed from the installed data, then restored |
+| `runs-0.1.2/experiment-designer-run3-app-0.1.3.json` | Fresh Experiment designer session on app 0.1.3, small-input `design_experiment` |

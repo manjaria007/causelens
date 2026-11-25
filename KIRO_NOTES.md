@@ -1178,3 +1178,35 @@ not perform are listed under "Not done" in the final block.
   do round for display (for example -0.0807 for -0.08066788519389068), which the prompt's "never round" does not allow; I did not change the prompts for it.
 - **Still pending:** the designer's refused input (needs a decision on `candidate_testing`, beyond the three change-point fields), a session-menu export
   of a transcript, and the Kiro MCP-panel screenshot (5.2). Stop hook: fresh automatic block `2026-11-24T02:02:27Z ... ruff_exit=0` (69 lines).
+
+### `design_experiment` small-input mode and the Designer re-run (app 0.1.3)
+
+- **Change.** `design_experiment` (`causelens/mcp/tools.py`) now has two mutually exclusive modes. **Prior result** (unchanged): `candidate_testing`
+  with the existing strict validation and provenance check (`require_candidate_result` recomputes the exclusions, stored DiDs, impacts and timing and
+  refuses a mismatch). **Small input**: omit `candidate_testing`, pass `pre_window` and optional `candidate_settings` (a strict `CandidateTestSettings`:
+  focal, candidates, expected_patterns, lag_days, sensitivity_lags, alpha, level, lead_days, did_cov, with `test_candidates`' defaults); the existing
+  `test_candidates` analytics function runs inside the call on the same dataset, windows, quality and exclusions, and the existing `design_experiment`
+  function builds the design from it. Both modes at once is refused ("Ambiguous request"); neither is refused; a dataset without an event log is refused.
+  A supplied prior that fails validation or provenance is an error and is never replaced by a recomputation. The published schema now marks
+  `candidate_testing` optional.
+- **Designer.** Its prompt calls the small-input mode with the Detective's windows (and `candidate_settings` only for settings the person declared),
+  retries with `arms: "each_candidate"` on `needs_input`, and quotes `evidence_strength`. Its tools are now `power_analysis` and `design_experiment`, as in the
+  Python role (it no longer needs `test_candidates`). App 0.1.3.
+- **Tests** (`tests/test_mcp_crew_fixes.py`, now 31): small input equals the intact-prior path on the reference data and under three settings (a declared
+  lag with `each_candidate` arms, a candidate list with level 0.9 and clustered DiD and an MDE, a declared uniform pattern); both-modes and neither-mode refused;
+  the native Designer's recorded `candidate_testing` (missing the two empty lists) is still refused with no design returned; a prior whose stored DiD
+  estimate was edited is refused naming `differential_effect` (my first version edited a verdict, which the provenance check does not compare, so that
+  tampering was not a valid regression); strict settings (`"0.9"`, `true` as a lag, an unknown key, `1.0` in the lags); no event log. The existing
+  prior-mode and tampering tests in `test_mcp_server.py` and `test_mcp_review.py` pass unchanged.
+- **Checks.** Focused suites (MCP, crew app, agents, console, evaluation): 463 passed; Ruff passed; `package_crew_app.py --check` up to date. Pushed
+  `b0cb926`; `kirocrew app update causelens`: "updated causelens v0.1.2 -> v0.1.3 ... Agents registered: 3"; installed tree equals the source; the
+  rendered Designer has the two tools. Then **the full suite once, after the final code change: 1,401 passed (242 s)**, Ruff passed.
+- **Native Designer, fresh session** (`causelens-experiment-designer-run3`, 2026-11-25T01:06:25Z, 18 s; saved as
+  `docs/crew-evidence/runs-0.1.2/experiment-designer-run3-app-0.1.3.json`): one call, `design_experiment` with `dataset_id`, `pre_window`, `post_window`;
+  `status: ok`, purpose `settle`. The answer quotes: focal device=mobile, browser=safari; rollback of Checkout v4.2 randomized by session; baseline 1.985%
+  (4,808 orders, 242,199 sessions, 18 days); MDE +0.585 pp labelled a provisional planning heuristic; 10,216 sessions per arm; power 0.800 at alpha 0.05; about
+  2 days, plan 7; the four guardrails with what each needs; the alternative 3-arm plan for the hero refresh at lag 1 (12,372 per arm, alpha 0.025); the
+  limits; evidence strength moderate. Replay check: 28 numbers, none unmatched (the check is indicative, see above). One wording slip: it opened with
+  "settle which release hurt conversion", which presumes a release caused the drop; the tool's own hypothesis is conditional.
+- **Task status.** 3.2 and parent 3 are checked. Still open: 5.1's session-menu export of a transcript and 5.2's Kiro MCP-panel screenshot, both owner
+  actions in the UI. Stop hook: latest automatic block in the log is shown in the final summary.
