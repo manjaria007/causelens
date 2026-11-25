@@ -883,3 +883,447 @@ Wording to keep consistent across the README, the docs and any write-up. Numbers
   and 390px widths: the requested result-driven headline, six steps, no scripts/external requests or
   page overflow. The installed Crew UI scaffold was created in scratch and its sample agent schema
   validated with zero problems; this was not the CauseLens app implementation.
+
+## Crew app (`.kiro/specs/crew-app`, branch `crew-app`)
+
+This section records what I observed on this Mac while following `docs/crew-handoff.md`. Prepared files are not evidence of a native run; steps I could
+not perform are listed under "Not done" in the final block.
+
+### Block 1: environment (spec task 1)
+
+- Repository: `git remote get-url origin` is `https://github.com/manjaria007/causelens.git`. Working directory `/Users/mickey/onenumber/causelens-cli`.
+- **Backup before updating `main`.** The unstaged edit to `.kiro/settings/mcp.json` (absolute `/Users/mickey/onenumber/causelens-cli` launcher path and
+  `PYTHONPATH`, no other servers) was copied to `/Users/mickey/onenumber/backups/mcp-settings-20261123-183650/` (`mcp.json`, `mcp.json.diff`, `head.txt`;
+  SHA-256 of the copy equals the original, `1e4ee4e6...9d2`). The handoff's suggested `/tmp` location would not survive a reboot, so I used a directory
+  outside `/tmp`. The backup holds no other server entries, so there was nothing to reapply. I then ran `git checkout -- .kiro/settings/mcp.json`
+  (that file only), created local `main` from `origin/main` at `bc12202`, and branched `crew-app` from it. The committed config is the relative
+  `/bin/bash scripts/mcp_stdio.sh`. I did not commit the old Mac path.
+- Versions observed: `kirocrew 0.13.1` (already installed at `~/.local/bin/kirocrew`; I did not run the installer), `kiro-cli 3.5.0`, Python 3.14.5 (repo
+  `.venv`), Crew's own interpreter Python 3.12 (`~/.kiro/crew-venv`), Node v26.13.1, npm 11.20.0.
+- `kirocrew doctor` exit 0, ending "Kiro Crew is ready!": edition standalone; `kiro-cli` found; "kiro auth: kiro-cli's own sign-in"; "kas auth: kiro-cli's own
+  sign-in"; connectivity `kiro-cli 3.5.0`; **gateway: not running** at the time. Warnings printed: no cgroup enforcement (not Linux); speech-to-text
+  dependencies and `ffmpeg` missing (not needed here); no optional agent backends (claude, codex). Side effect I observed: doctor logged "Managed agent config
+  /Users/mickey/.kiro/agents/kirocrew.json missing, regenerating" and the `kirocrew-*.json` agent files in `~/.kiro/agents/` are dated that minute, so running
+  doctor wrote them. I did not run the interactive `kirocrew setup` wizard.
+- `.venv/bin/python -m ruff --version`: `ruff 0.17.6`.
+- Stop-hook baseline (not yet a proof): `.pytest_cache/stop-hook-runs.log` has 48 lines. Its last block is `=== stop hook start 2026-11-23T01:23:26Z
+  cwd=/Users/mickey/onenumber/causelens-cli` ... `ruff_exit=0`; `date -u` at capture was `2026-11-23T23:39:47Z`. Earlier blocks (from 2026-11-21T16:48:35Z) show the hook
+  has run with this clone's `cwd`; I never invoked the hook command myself in this session, but I cannot show which agent turns produced which blocks.
+
+### Block 2: the installable app (spec task 2)
+
+- `kirocrew app init causelens --dir ... --ui` scaffold inspected, then copied to `crew/causelens/` and edited. The manifest declares the MCP server as the
+  one relative form the installed Crew documents (a bare `python3` with a relative `.py` argument resolved against the app root): `python3 mcp_server.py`.
+  `requirements.txt` is provisioned by Crew for a stdio server. The runtime (`analytics/`, `mcp/`) and the observed reference data are packaged inside the
+  app by `scripts/package_crew_app.py` (`--check` detects drift); the simulator and the answer key are not shipped.
+- Validated with the installed release: `kirocrew agent validate crew/causelens/agents` reports "Checked 3 agent spec(s): 0 problem(s)"; Crew's
+  `AppManifest.from_json_file(...)` loads `app.json` and `validate(...)` returns `[]`.
+- Copied-location test: the app tree copied elsewhere starts with `python mcp_server.py` (no `PYTHONPATH`, another working directory) and serves all 15 tools
+  over stdio, `list_datasets` returns 5,888 rows with the `7c8fe7196f23...` fingerprint, and `check_data_quality` returns `["2026-09-20"]`. That test uses the repo's
+  Python 3.14 interpreter, not Crew's registration, so it does not yet show how Crew starts the server.
+- UI: `ui/src/App.tsx` (the scaffold's ESM component contract) with a `ChatEmbed` and the packaged static console labelled as a static reference result.
+  Built with `npm install --legacy-peer-deps && npm run build` (plain `npm install` fails because the scaffold lists `@kirocrew/app-sdk`, which is not on npm,
+  as a peer dependency). The built `ui/dist/index.mjs` is committed, because a registry install does not build an app whose `package.json` is not at the app root.
+- Crew's own interpreter: I installed the app's `requirements.txt` with Crew's Python 3.12.13 into a scratch `--target` directory (not into Crew's venv;
+  its `truststore` 0.10.4 and `opentelemetry-api` 1.44.0 are unchanged, pip only warned about the scratch copy) and started a copied app with that
+  interpreter: 15 tools including `daily_series`, `check_data_quality` excluded `["2026-09-20"]`, `daily_series` returned 92 points. This imitates what
+  Crew's provisioning does; it is not Crew's registration.
+
+### Block 3 (partial): registry, Discover listing and the install attempt (spec task 4.1, start of 4.2)
+
+- Committed a repo-root `app-registry.json` with one entry (`causelens`, `subdirectory: crew/causelens`). Opted in with
+  `kirocrew config set registries` to `{"name": "causelens-dev", "repo": "https://github.com/manjaria007/causelens", "branch": "crew-app"}`; Crew stored it with
+  `"trust": "index"`. The branch is `crew-app` until this is merged; then it should be `main`.
+- Started `kirocrew gateway` in the background (it is still running, port 5476). Its log: "External registry causelens-dev entry 'causelens' declares branch
+  'main'; using the configured registry branch 'crew-app'".
+- `GET /api/apps/registry` (the list the Discover page renders), with the owner's dashboard session: CauseLens is listed from `_registry: causelens-dev`,
+  `provenance: external`, `verified: false`, `installed: false`, with its manifest, icon URL and the three agents. **This is the API behind Discover, not a
+  screenshot of the Discover page.**
+- `POST /api/apps/registry/install` for `causelens` (the Install button's endpoint) returned HTTP 400, `code: app_execution_denied`: "third-party app execution
+  is disabled; trust this app alone from the dashboard's App Store, whose install, update and enable prompts ask for it (agent.apps_trusted), or set
+  agent.apps_allow_third_party=true". `agent.apps_trusted` is `[]` and `agent.apps_allow_third_party` is `false`. I stopped there: granting a third-party
+  app permission to run code on this machine is the owner's decision in the trust prompt, and I did not change either setting.
+
+### Not done yet (needs the owner at the dashboard and in Kiro)
+
+- (1.2 and 1.3 were completed in the next turn; see below.) 5.2: the native Kiro MCP panel with 15 tools has not been captured.
+- 4.2: install from Discover, the trust review, enable, `kirocrew app dev causelens`.
+- 2.3's remaining part (Crew starting the packaged server from its own install), 3.2, 3.3 and 5.1: no native Crew session has run the agents, so there is no
+  transcript, Activity or export.
+- 5.3: see the observation in the next block.
+
+### Task 1 check and Task 2 completion (next turn)
+
+- **Task 1 status, re-checked against these notes before starting Task 2.**
+  - Doctor: recorded above (exit 0, "Kiro Crew is ready!", kiro-cli sign-in, gateway not running at the time).
+  - Setup: missing until now. I backed up `~/.kiro/agents/*.json` (14 files) to `/Users/mickey/onenumber/backups/kiro-agents-20261123-191957/` and ran
+    `kirocrew setup --agent-only`: exit 0, "Agent installed: /Users/mickey/.kiro/agents/kirocrew.json". The interactive wizard steps were skipped by that flag;
+    I did not run the interactive wizard. (Superseded below: the checklist now names `--agent-only`, and 1.2 is checked.)
+  - Fifteen tools: in this native Kiro CLI 3.5.0 session the attached `causelens` server offers exactly 15 tools (`check_data_quality`, `check_pre_trends`,
+    `confirm_change`, `daily_series`, `decompose_change`, `design_experiment`, `detect_change_point`, `estimate_did`, `list_datasets`,
+    `match_event_candidates`, `power_analysis`, `project_impact`, `run_placebo`, `test_candidates`, `test_event_scope`). A fresh attached call to
+    `daily_series` (dataset `reference`, segment mobile/safari) returned 92 points from 2026-08-01 to 2026-10-31, 2026-09-20 marked `excluded`, no missing dates,
+    and the post-review assumption text, so the attached server runs the current code. I did not reconnect the server and this is not a screenshot of the MCP
+    panel. (Superseded below: 1.3 now names the attached call and is checked; the panel capture stays in 5.2.)
+- **Stop hook, observed.** After my previous turn ended, `.pytest_cache/stop-hook-runs.log` grew from 48 to 51 lines with a new block:
+  `=== stop hook start 2026-11-24T00:09:03Z cwd=/Users/mickey/onenumber/causelens-cli`, `All checks passed!`, `=== stop hook end 2026-11-24T00:09:03Z ruff_exit=0`.
+  My last command of that turn ran at 2026-11-24T00:08:46Z (the baseline capture) and I did not invoke the hook command. That is a fresh automatic block after a
+  real native agent turn (spec 5.3), with the caveat that I infer the trigger from timing; I did not see the hook's own UI output.
+- **Task 2, verified again after the pull-up of Task 1.**
+  - `python scripts/package_crew_app.py --check`: up to date. `kirocrew agent validate crew/causelens/agents`: 3 specs, 0 problems. Crew's `AppManifest` loads
+    `app.json` and `validate` returns `[]`.
+  - Copy outside the repository: `git archive HEAD crew/causelens` unpacked to `/tmp/proto/outside/causelens`, started with Crew's own Python 3.12.13 and a
+    clean environment (`env -i`, only `PATH` and the scratch dependency directory). 15 tools including `daily_series`; `list_datasets` gives `reference`, 5,888
+    rows, fingerprint `7c8fe7196f23...`, 2026-08-01 to 2026-10-31; `check_data_quality` excludes `["2026-09-20"]`; `causelens` is imported from the copy's
+    `runtime/`. I then renamed the source checkout away for a few seconds and ran the same probe: identical output, so it does not reach back into the repo.
+    (While renamed, the gateway and this session's MCP server were running; I restored the name immediately and saw no error.)
+  - The analytics, MCP code, simulator, data and steering are unchanged against `origin/main` (`git diff --stat` empty). New test: the app contains no credential
+    files, key-shaped strings or `secret://` references, and no agent or server `env`.
+  - Focused checks: `tests/test_crew_app.py` (22), plus the MCP server, CLI and daily-series tests: 159 passed; Ruff passed. Not the full suite.
+  - 2.3 is checked on this basis: the packaged launcher works from a copy outside the checkout under Crew's interpreter. Crew's own registration of the server
+    (provisioning `requirements.txt` and resolving `python3 mcp_server.py` itself) can only be observed after install, which is Task 4.
+
+### Task 1 checklist corrected, and Task 3 (UI and local checks)
+
+- Remote confirmed `https://github.com/manjaria007/causelens.git`; branch `crew-app`; PR #13 open and not merged by me.
+- **Task 1 wording.** `tasks.md` 1.2 now names what ran: `kirocrew setup --agent-only` (exit 0, agent config installed) and `kirocrew doctor` (exit 0, kiro-cli's
+  own sign-in reported for the kiro and kas backends). The interactive wizard did not run and is stated as not run. 1.3 now names the native evidence: 15
+  attached tools in a native Kiro CLI 3.5.0 session and a fresh `daily_series` call. The MCP-panel screenshot stays in 5.2. I did not rerun setup. Parent task 1
+  and parent task 2 are checked because all their subtasks are.
+- **Stop hook, second observation.** After the previous turn ended, the log grew from 51 to 54 lines: `=== stop hook start 2026-11-24T00:26:37Z
+  cwd=/Users/mickey/onenumber/causelens-cli`, `All checks passed!`, `=== stop hook end 2026-11-24T00:26:37Z ruff_exit=0`. I did not run the hook command.
+- **Lint fix.** `crew/causelens/mcp_server.py` had an unused `# noqa: E402` (Ruff RUF100; my earlier Ruff runs did not include `crew/`). Replaced with a plain
+  comment. Ruff now runs on `causelens tests scripts crew`.
+- **Page (3.1).** `ui/src/App.tsx` uses only exports present in the installed SDK's type declarations (`kiro_crew/static/dist/vendor/kirocrew-app-sdk.d.ts`,
+  Crew 0.13.1): `ChatEmbed`, `useChatLauncher` from `@kirocrew/app-sdk`; `PageHeader`, `Card`, `CardTitle`, `Btn`, `EmptyState` from `@kirocrew/app-sdk/ui`.
+  - Agent tabs for Detective, Scientist and Experiment designer. Each mounts a `ChatEmbed` with its own slot (`causelens-<agent>`) and `agent` set to the
+    registered name, using the embed's own send path (the manifest grants `/api/chat`, the documented requirement). A button opens the same agent in a full
+    chat via `useChatLauncher().openChat` with a draft that is not sent automatically.
+  - The packaged console is probed first and shown in a sandboxed iframe only if the file answers as HTML; otherwise an "unavailable" notice with the HTTP status
+    or error. It is labelled "Static reference result" and "not the output of a native Crew agent or of a hosted model". The page states no finding of its own
+    and never falls back to one. A render error in a panel is caught and shown as a message instead of blanking the page.
+  - No MCP-call endpoint or SDK method was invented; the agents reach the tools through Crew's own registration.
+  - Pure logic is in `ui/src/model.ts`.
+- **Build.** `npm ci` fails with 404 on `@kirocrew/app-sdk` (a host-provided peer, not on npm). `npm ci --legacy-peer-deps` installs from the existing
+  lockfile without changing it; `npm run build` gives `dist/index.mjs` (6.20 kB). The flag is documented in the app README. TypeScript was not type-checked
+  (the scaffold ships no `tsc`, and I did not add one).
+- **Tests, with what they are.**
+  - `crew/causelens/ui/test/` (Node's runner, `npm test`): 7 passed. `model.test.mjs` tests `model.ts` directly. `page.test.mjs` renders the built bundle with
+    `react-dom/server` against **test stubs** in `ui/test/stubs/` that stand in for the host SDK and only record what the page passes to them. They check the
+    default agent's `ChatEmbed` props, three tabs, the static label, that the iframe waits for the probe, a single `fetch` to the packaged console, no invented
+    MCP route, and no planted finding in the page's text. They do not run Crew, a chat, an agent or MCP.
+  - `tests/test_crew_app.py`: 26 passed. New: the Node tests run from pytest; the committed bundle equals a fresh build of the committed source; and two
+    checks of the packaged server through the official SDK client (as an agent's calls would arrive, not an agent): with no planted change the tools return
+    `not_distinguishable_from_noise` with `stop_investigation` and support no candidate; with two days removed `daily_series` and `confirm_change` list them as
+    missing (90 points) instead of filling them.
+  - Ruff on `causelens tests scripts crew`: passed. `package_crew_app.py --check`: up to date. Analytics, MCP rules, simulator and reference data unchanged.
+- **Deferred to after Task 4 (install and the owner's trust approval):** the page rendering inside Crew; native agents making real MCP calls (3.2); native
+  insufficient-evidence and missing-data behaviour (3.3); any transcript. I did not change `agent.apps_trusted` or `agent.apps_allow_third_party`.
+
+### Task 3 review fixes (PR #13, review of `bf27bf3`)
+
+- **The console could not load inside Crew.** The reviewer observed Crew 0.13.1 answering HTTP 403 for `/apps/causelens/ui/console.html` (its app asset route
+  refuses `.html`); I had not loaded the page inside Crew, so my "probe then iframe `src`" design was untested there. The page now imports `../console.html?raw`
+  (Vite inlines the text at build time; `dist/index.mjs` is 130.46 kB, 22.72 kB gzipped) and shows it in an iframe with `srcDoc` and `sandbox=""`, no `src`, and
+  no `fetch`. The "Static reference result" label and the not-a-native-agent explanation are unchanged around the frame; if the bundled text is empty or not an
+  HTML page, an "unavailable" notice is shown instead. The console's provenance links are in-page anchors (`#call-N`): a test checks every one has its target
+  in the bundled document and that the frame holds the packaged file unchanged. Whether anchor clicks scroll inside a sandboxed `srcDoc` frame in Crew's
+  dashboard was not checked in a browser.
+- **The test command failed on Node 24.** `node --test test/` relied on directory expansion (it works on this Mac's Node 26, which is why I missed it).
+  `package.json` and the pytest wrapper now pass `test/model.test.mjs test/page.test.mjs` explicitly, and the wrapper asserts the script matches. Not run on
+  Node 24 here.
+- Focused checks: `npm run build` (after `npm ci --legacy-peer-deps`); UI tests 8 passed (stubs, not Crew); `tests/test_crew_app.py` 26 passed, including the
+  rebuild-equals-committed-bundle check; Ruff on `causelens tests scripts crew` passed; `package_crew_app.py --check` up to date.
+- Native Crew verification remains pending (Task 4 install and the owner's per-app trust prompt).
+
+### Console fragment links inside the embedded view (PR #13)
+
+- **Finding.** Inside the sandboxed `srcDoc` frame, the console's in-page links (`href="#call-N"` source links and the six `href="#step-..."` step links) resolve
+  against the parent page's URL, because an `about:srcdoc` document takes its parent's URL as its base. I confirmed it in a real browser before the fix (the
+  control test below): clicking a bare `#call-8` loaded the parent page (`http://127.0.0.1:<port>/control#call-8`, title "parent") into the frame, with a new
+  request for `/control`, and the console was gone.
+- **Fix.** `embedForSrcdoc` in `ui/src/model.ts` rewrites `href="#X"` to `href="about:srcdoc#X"` in the copy handed to `srcDoc`. The packaged
+  `ui/console.html` (and `docs/demo/index.html`) keep their canonical `#call-N` links; `sandbox=""` is unchanged. Rebuilt: `dist/index.mjs` 130.60 kB.
+- **Browser regression** (`ui/test/browser.test.mjs`): headless Chrome (the installed Google Chrome) driven over the DevTools protocol. The parent page is
+  served over HTTP from 127.0.0.1 and holds the iframe markup the built page renders with the test stubs (not the Crew dashboard). The sandboxed frame runs out of
+  process, so it is attached as its own target and read in an isolated world. The test picks a visible, clickable source link whose target is out of view
+  and clicks it with real mouse events. Observed: link `about:srcdoc#call-8`; frame `scrollY` 0 -> 9849; the target's top 10068 -> 219 within a 569 px frame
+  (in view; it cannot reach the top because it is near the end); frame URL `about:srcdoc#call-8`, title still "CauseLens investigation"; no
+  `Network.requestWillBeSent` after the click; the server saw only `/page` (and the browser's own `/favicon.ico`). A control with the unrewritten console
+  asserts the failure above. One caveat: links inside a closed `<details>` are laid out but not hit by clicks, so the test skips them when choosing a link.
+- **Flakiness I hit and what I changed.** Three runs hung until the caller's timeout (twice from a Python wrapper, once under pytest) before I added bounds; I did
+  not identify the cause. The test now bounds every DevTools wait, starts Chrome in its own process group and kills the group, and closes all server
+  connections before closing the server. After that: 8 consecutive direct runs, 4 more, and 3 pytest runs all passed in about 3.4 s each, with no leftover
+  Chrome processes. The pytest wrapper now reports partial output if the Node tests ever exceed 150 s.
+- Focused checks: UI tests 10 passed (8 stub/unit, 2 browser); `tests/test_crew_app.py` 26 passed (three runs); Ruff on `causelens tests scripts crew` passed;
+  `package_crew_app.py --check` up to date. Native Crew verification (the page and its links inside the Crew dashboard) is still pending Task 4.
+
+### Task 4: Discover listing in the real dashboard (before the trust review)
+
+- Gateway: `kirocrew status` showed Crew v0.13.1 up 1h 37m (the gateway I started in the background earlier). `agent.apps_trusted` is `[]` and
+  `agent.apps_allow_third_party` is `false`; I did not change them.
+- `POST /api/apps/registries/refresh` (owner session): `{"ok": true, "refreshed": ["causelens-dev"], ...}` at 2026-11-24T01:43:23Z. `GET /api/apps/registry`:
+  CauseLens 0.1.0 from `causelens-dev`, branch `crew-app`, subdirectory `crew/causelens`, `installed: false`, `provenance: external`, `verified: false`.
+- **The Discover page itself**, rendered by headless Chrome logged in with the owner's dashboard token (the real dashboard at `localhost:5476`, not a mock;
+  screenshots in `docs/crew-evidence/`):
+  - `01-apps-discover.png`: Apps → Discover, with "causelens-dev 1 app" under Sources.
+  - `02-discover-causelens-detail.png`: after choosing that source, `/apps/detail/causelens`: "CauseLens, manjaria007 · v0.1.0, Source causelens-dev",
+    an **Install** button, the description, Permissions "API ACCESS /api/chat", MCP Servers "causelens python3", the tags and the repository link. The
+    Contributors box shows an unrelated error (the gateway has no `gh` CLI).
+  - The token was used only in the browser session; it is not in the screenshots or these notes.
+- **Stopped here for the owner.** I did not press Install: the app-specific trust prompt it opens is the owner's to review and accept or refuse. Task 4.1 is
+  observed; 4.2, the in-dashboard checks of the page, 3.2, 3.3 and Task 5 wait on that decision.
+
+### Task 4 completed, page checked inside Crew, first native agent run (3.2 partly)
+
+- **Install (owner).** The owner reviewed the per-app trust prompt and installed CauseLens from Discover. `kirocrew app info causelens` then: `enabled: true`,
+  `installedAt 2026-11-24T01:49:12Z`, `source: registry:causelens`, `sourceRegistry: causelens-dev`, `approvedGrants.api: ["/api/chat"]`. Config:
+  `agent.apps_trusted: ["causelens"]`, `apps_trusted_repositories: {"causelens": "https://github.com/manjaria007/causelens"}`, and
+  `agent.apps_allow_third_party` still `false` (no global grant). The installed tree equals `crew/causelens` (plus `installed.json` and a deps lock); Crew
+  provisioned `requirements.txt` into `data/.kirocrew-deps`; no `ground_truth` file is present.
+- **`kirocrew app dev causelens`**: "causelens is now in dev mode"; `app info` shows `dev: true`.
+- **A real bug found at registration.** The gateway log warned for all three agents: "grants MCP tool ref(s) not found in this agent's merged mcpServers ...
+  kiro-cli will silently never mount them: @causelens/list_datasets ...". Crew registers an app's server as `<app>:<server>` (`causelens:causelens`), so my refs
+  `@causelens/<tool>` dangled and the agents would have had no tools. Fixed the refs to `@causelens:causelens/<tool>` (the builtin `mochi` app uses the same
+  `@mochi:mochi` form), added a test that asks Crew's own `_unresolvable_tool_refs` with the server map Crew builds (it reported the old form as dangling),
+  bumped the app to 0.1.1 and ran `kirocrew app update causelens`: "updated causelens v0.1.0 -> v0.1.1 ... Agents registered: 3, Skills registered: 1",
+  `sourceCommit 60a3b41`, no new warnings. The rendered agents (`~/.kiro/agents/causelens--causelens-*.json`) carry server `causelens:causelens`, launched as
+  Crew's Python 3.12 with `deps_boot.py <app>/data/.kirocrew-deps <app>/mcp_server.py`.
+- **The page inside the real Crew dashboard** (headless Chrome, owner session; `docs/crew-evidence/03-*.png` to `05-*.png`, `pagecheck.json`):
+  - `/apps/causelens` renders the CauseLens header, "Investigate with the native agents" and "Reference console (static reference result)" with the full
+    "Static reference result. ... not the output of a native Crew agent or of a hosted model" text. No error or "unavailable" notice.
+  - Three tabs: Detective (selected by default), Scientist, Experiment designer. Clicking each selected it and showed its registered name
+    (`causelens-detective`, `causelens-scientist`, `causelens-experiment-designer`) in the role line and the chat embed header.
+  - One iframe: `sandbox=""`, no `src`, `srcdoc` of 128,544 characters. It attached as an out-of-process `about:srcdoc` frame.
+  - Link click (real mouse event) on the visible `about:srcdoc#call-8`: frame `scrollY` 0 -> 9501, the target's top 10068 -> 567 in a 917 px frame (in view);
+    URL `about:srcdoc#call-8`; title still "CauseLens investigation". The frame made no request after the click. The parent dashboard made three requests in that
+    window (`/api/apps`, `/api/instances` twice), which I take to be its own polling; I did not prove they are unrelated to the click.
+- **Native run, Detective** (typed into the page's `ChatEmbed` and sent with Enter in the real dashboard at 2026-11-24T01:57:39Z; transcript read back through
+  `GET /api/chat/slots/causelens-detective`, saved as `docs/crew-evidence/slot-causelens-detective.json` with the device name redacted; screenshot
+  `06-detective-native-transcript.png`):
+  - Turn 1: the agent tried `load_resource` for `tool::causelens::list_datasets` and was told it was not in the catalogue. It answered that the CauseLens tools
+    were still starting, ran nothing and gave no numbers. (I do not know whether the server was still starting or the tool id was wrong.)
+  - Turn 2 ("Try the investigation again now"): real MCP calls, visible as tool rows: `list_datasets`, `check_data_quality`, `daily_series`,
+    `detect_change_point`, `confirm_change`, `match_event_candidates` (twice), `decompose_change`. Its report quotes the tools: 2026-09-20 excluded with 7 flags
+    and "Analytics tag deploy" called a coincidence; best onset 2026-10-15, plausible 2026-10-14 to 2026-10-15; 3.249% -> 3.064% on 73 and 18 days and
+    3,119,066 and 800,474 sessions; -0.184 pp (95% CI -0.252 to -0.114), -5.7% (-7.8% to -3.5%); 71 BH-controlled tests. These match the tool results.
+  - **Failure 1, `match_event_candidates`:** both calls were refused with "segment: Field required; exclusions.missing_dates: Field required;
+    exclusions.truncated_baseline_dates: Field required". In the logged input those keys are absent; in the tool's output they were `{}` and `[]`. The agent
+    says it sent them as empty values. So the empty containers were lost between the model and the server, and the strict prior-result validation then refuses
+    the copy. No event list was produced.
+  - **Failure 2, `decompose_change`:** the result (245,914 characters as the client reported it) exceeded the client's 30,000-character tool-output limit; the
+    agent saw only a preview and has no file tool. It reported only the mobile Safari row it could see (-0.658 pp, 95% CI -0.739 to -0.577, q 8.92e-16) and
+    said it did not see the tool's chosen segment, share of change or `remaining_share_of_change` and would not guess them. Measured locally: the default
+    decomposition is 157 kB of JSON; with `dimensions` device and browser only it is 38 kB, still over the limit.
+  - It labelled "Evidence strength: weak for any cause" itself. No tool returned that label in this run (the Detective has no tool that assesses strength), so
+    this does not follow the prompt's "state the evidence strength exactly as the tool reports it". It made no causal claim.
+- **Not done yet:** Scientist and Experiment designer runs, the insufficient-evidence and missing-data runs (3.3), the UI transcript export (I read the
+  transcript through the API instead; that is not the session menu's Export), and the Kiro MCP-panel screenshot (5.2). The two failures above have to be fixed
+  first for a complete 3.2; both need a decision (below).
+- **Stop hook (5.3).** Fresh automatic blocks keep appearing after my turns (latest observed `2026-11-24T01:47:11Z ... ruff_exit=0`, 66 lines); 5.3 is checked.
+
+### Fixes from the first native run, and the native runs repeated (app 0.1.2)
+
+- **1. `match_event_candidates` input repair (three fields only).** `causelens/mcp/models.py` `restore_known_change_point_omissions`: inside the change
+  point given to `match_event_candidates`, `segment` is restored to `{}` and `exclusions.missing_dates` / `exclusions.truncated_baseline_dates` to `[]`, each
+  only when its key is absent. Supplied values are kept; an explicit `null`, a wrong type, a missing core field (`status`, `plausible_dates`, `exclusions`
+  itself, `exclusions.applied`) is still refused by the same strict validation. No other prior result gets any restoration (a quality report missing
+  `missing_dates` is still refused, tested). **Limitation:** `match_event_candidates` does not recompute the change point, so a copied change point that was
+  *edited* (rather than shortened) is used as given; this was already true and the repair does not change it. The published input schema still lists the
+  three fields as required.
+- **2. `decompose_change(..., detail="summary")`.** New `causelens/analytics/decompose_summary.py` (`DecompositionSummary`, `summarize_decomposition`): a
+  projection that copies, never computes. It carries the windows, the settings used, exclusions, assumptions, the localization with each selected segment's
+  structured labels and full effect record (interval, sessions, FDR-adjusted q), the FDR family and test counts, the localized partition's remainder with the
+  selected set verbatim (`remaining_share_of_change` -0.0807 on the reference data, negative and unchanged), up to three next-ranked segments, the reasons per
+  partition when nothing is localized, and `detail: "summary"` with a note that it is not a decomposition. `"full"` stays the default and its structured
+  content equals the analytics result exactly (tested). The SDK wraps a union return in `{"result": ...}`, which would have changed the full response, so the
+  tool returns a root model whose published schema is `{"type": "object", "properties": <fields both share>, "anyOf": [full, summary]}`;
+  `test_mcp_server` was adjusted for that one tool. Sizes through the SDK client on the reference data: full text 245,914 characters; summary text 12,880
+  (structured JSON 10,988). A summary passed as `decomposition` to `test_candidates` is refused (tested); called without one, `test_candidates` recomputes.
+- **3. Detective strength wording.** The summary includes a fixed `causal_attribution`: `strength: "insufficient"`, reason "insufficient for a causal
+  attribution: a decomposition describes where the change is concentrated, not why; no identification design ... and no candidate test has run in this
+  call", `checks_run: []`. The Detective prompt now quotes it word for word; each role's report names where its strength comes from (Scientist:
+  `test_candidates` `evidence.strength`; Experiment designer: `design_experiment` `evidence_strength`).
+- **Verification before the native retry.** `tests/test_mcp_crew_fixes.py` (22): the exact change point the native Detective sent (read from the preserved
+  transcript) omits exactly those three fields and is now accepted with output identical to the complete change point; 11 strict rejection cases; supplied
+  values kept and nothing invented; no restoration for other prior results; summary equals full field by field; summary text under 15,000 and JSON under
+  12,000; the fixed attribution; summary refused as a decomposition; a no-localization case carries `localization_note` and per-partition reasons; settings
+  echo the arguments. Six mutations (no restore, overwrite, invent `exclusions`, recompute a remainder, flip the default, change the strength) were all caught.
+  Focused suites: MCP server, review, CLI, datasets, crew app, agents, eval, console: 525 passed after one test fix (the runtime-import check now parses
+  imports with `ast`; a docstring line starting "from it" had matched). Ruff passed. The packaged runtime was regenerated; app 0.1.2 pushed (`781e4a0`) and
+  `kirocrew app update causelens`: "updated causelens v0.1.1 -> v0.1.2 ... Agents registered: 3"; installed tree equals the source; no new registration
+  warnings.
+- **Native runs, fresh sessions** (new slots started with `POST /api/chat`, the endpoint the page's embed sends to, with the agent named; transcripts read back
+  and saved under `docs/crew-evidence/runs-0.1.2/`; the failed 0.1.1 transcript is kept as history):
+  - **Detective, reference data** (02:20:54Z, 28 s): `list_datasets`, `check_data_quality`, `daily_series`, `detect_change_point`, `confirm_change`,
+    `match_event_candidates` (**accepted**: Checkout v4.2 and Homepage hero refresh listed as date matches only), `decompose_change` with the summary. It reported
+    the localization to device=mobile, browser=safari (-0.658 pp, 95% CI -0.739 to -0.577, 242,199 sessions after, q 8.92e-16, 71 tests), the remainder
+    (-0.0807, and 0.01397 pp not distinguishable), and quoted `causal_attribution` "insufficient" with its reason verbatim. No causal claim.
+  - **Scientist, reference data** (02:21:44Z, 28 s): `test_candidates`, `estimate_did`, `check_pre_trends`, `run_placebo`, `project_impact`. Checkout v4.2
+    supported at lag 0, Homepage hero refresh rejected as the sole cause (Holm p 0.00606) and inconclusive at lag 1, the ambiguity stated, share sets given;
+    DiD -0.680 pp (95% CI -0.774 to -0.585) on 73 and 18 days with the sessions; pre-trend and placebo pass; overall -0.206 pp, about 1,646 lost orders (1,416
+    to 1,876); the assumptions listed; strength **moderate as the tool reports it** (base strong, capped by ambiguity).
+  - **Experiment designer, reference data** (02:22:24Z, 88 s): `test_candidates` ok, then `design_experiment` **refused twice**: `exclusions.missing_dates:
+    Field required; exclusions.truncated_baseline_dates: Field required` inside `candidate_testing`. The same empty-container loss, in a prior result this round
+    did not repair (by instruction). The agent said it could not design the experiment, gave no sample size, did not call `power_analysis` because it had no
+    baseline from a tool, and quoted the test results instead. So 3.2 is not complete.
+  - **No change** (installed `data/metrics_daily.csv` swapped for a seeded no-change simulation, SHA-256 `0ea0e805...`, restored to `7c8fe719...` right after,
+    hash checked): the Detective found no change point (adjusted p = 1), `confirm_change` gave `not_distinguishable_from_noise` with the tool's data-needed
+    figures, it stopped, ran neither the event match nor the decomposition, and made no causal claim or reference finding.
+  - **Missing days** (2026-09-05 and 2026-10-20 removed, SHA-256 `eceb70b3...`, restored and checked): the Detective listed both dates as having no rows, used
+    72 and 17 days, and reported the localization and attribution as before with this data's own numbers.
+- **Numbers.** I replayed each run's logged tool inputs against the same server code and data (the tools are deterministic) and checked every number in each
+  final answer against the full replayed outputs: 31, 61, 24, 26 and 35 numbers, none unmatched. The match accepts the value rounded to the digits shown
+  (and as a percentage); with six decoy numbers added, five were flagged and one (3.141) matched by chance, so this check is indicative, not proof. The agents
+  do round for display (for example -0.0807 for -0.08066788519389068), which the prompt's "never round" does not allow; I did not change the prompts for it.
+- **Still pending:** the designer's refused input (needs a decision on `candidate_testing`, beyond the three change-point fields), a session-menu export
+  of a transcript, and the Kiro MCP-panel screenshot (5.2). Stop hook: fresh automatic block `2026-11-24T02:02:27Z ... ruff_exit=0` (69 lines).
+
+### `design_experiment` small-input mode and the Designer re-run (app 0.1.3)
+
+- **Change.** `design_experiment` (`causelens/mcp/tools.py`) now has two mutually exclusive modes. **Prior result** (unchanged): `candidate_testing`
+  with the existing strict validation and provenance check (`require_candidate_result` recomputes the exclusions, stored DiDs, impacts and timing and
+  refuses a mismatch). **Small input**: omit `candidate_testing`, pass `pre_window` and optional `candidate_settings` (a strict `CandidateTestSettings`:
+  focal, candidates, expected_patterns, lag_days, sensitivity_lags, alpha, level, lead_days, did_cov, with `test_candidates`' defaults); the existing
+  `test_candidates` analytics function runs inside the call on the same dataset, windows, quality and exclusions, and the existing `design_experiment`
+  function builds the design from it. Both modes at once is refused ("Ambiguous request"); neither is refused; a dataset without an event log is refused.
+  A supplied prior that fails validation or provenance is an error and is never replaced by a recomputation. The published schema now marks
+  `candidate_testing` optional.
+- **Designer.** Its prompt calls the small-input mode with the Detective's windows (and `candidate_settings` only for settings the person declared),
+  retries with `arms: "each_candidate"` on `needs_input`, and quotes `evidence_strength`. Its tools are now `power_analysis` and `design_experiment`, as in the
+  Python role (it no longer needs `test_candidates`). App 0.1.3.
+- **Tests** (`tests/test_mcp_crew_fixes.py`, now 31): small input equals the intact-prior path on the reference data and under three settings (a declared
+  lag with `each_candidate` arms, a candidate list with level 0.9 and clustered DiD and an MDE, a declared uniform pattern); both-modes and neither-mode refused;
+  the native Designer's recorded `candidate_testing` (missing the two empty lists) is still refused with no design returned; a prior whose stored DiD
+  estimate was edited is refused naming `differential_effect` (my first version edited a verdict, which the provenance check does not compare, so that
+  tampering was not a valid regression); strict settings (`"0.9"`, `true` as a lag, an unknown key, `1.0` in the lags); no event log. The existing
+  prior-mode and tampering tests in `test_mcp_server.py` and `test_mcp_review.py` pass unchanged.
+- **Checks.** Focused suites (MCP, crew app, agents, console, evaluation): 463 passed; Ruff passed; `package_crew_app.py --check` up to date. Pushed
+  `b0cb926`; `kirocrew app update causelens`: "updated causelens v0.1.2 -> v0.1.3 ... Agents registered: 3"; installed tree equals the source; the
+  rendered Designer has the two tools. Then **the full suite once, after the final code change: 1,401 passed (242 s)**, Ruff passed.
+- **Native Designer, fresh session** (`causelens-experiment-designer-run3`, 2026-11-25T01:06:25Z, 18 s; saved as
+  `docs/crew-evidence/runs-0.1.2/experiment-designer-run3-app-0.1.3.json`): one call, `design_experiment` with `dataset_id`, `pre_window`, `post_window`;
+  `status: ok`, purpose `settle`. The answer quotes: focal device=mobile, browser=safari; rollback of Checkout v4.2 randomized by session; baseline 1.985%
+  (4,808 orders, 242,199 sessions, 18 days); MDE +0.585 pp labelled a provisional planning heuristic; 10,216 sessions per arm; power 0.800 at alpha 0.05; about
+  2 days, plan 7; the four guardrails with what each needs; the alternative 3-arm plan for the hero refresh at lag 1 (12,372 per arm, alpha 0.025); the
+  limits; evidence strength moderate. Replay check: 28 numbers, none unmatched (the check is indicative, see above). One wording slip: it opened with
+  "settle which release hurt conversion", which presumes a release caused the drop; the tool's own hypothesis is conditional.
+- **Task status.** 3.2 and parent 3 are checked. Still open: 5.1's session-menu export of a transcript and 5.2's Kiro MCP-panel screenshot, both owner
+  actions in the UI. Stop hook: latest automatic block in the log is shown in the final summary.
+
+### Prompt wording: hypothesis first, exact numbers, segment change vs DiD, noise wording (apps 0.1.4 to 0.1.6)
+
+- **0.1.4 (`e843a5e`).** The generated prompts (`scripts/package_crew_app.py`) now say: write a number exactly as in the tool's JSON or inside a tool
+  display string quoted verbatim, with no rounding, shortening, percent conversion or added thousands separators; name every effect as either the
+  segment's own before/after change (`confirm_change`, decomposition) or the difference-in-differences effect (`estimate_did`, a candidate's
+  `differential_effect`), with its source tool; describe a nonsignificant result as "not distinguishable from noise" and never as "no change", "no effect" or
+  "no real change". The Designer opens with the tool's `hypothesis`, quoted verbatim; "settle which release hurt conversion" is gone. Test:
+  `test_the_prompts_carry_the_number_effect_and_noise_rules`.
+- **Number check made strict.** My replay checker's `--exact` mode used a substring match, so a truncated number passed (`0.0151110636` is a prefix of the
+  JSON value). It now requires a whole-token match against the replayed tool JSON and tool text. On the 0.1.4 runs it flagged: Detective `242,199`;
+  Designer `19,721`, `558,275`, `12,372` (separators the agent added); no-change Detective `0.0151110636`, `0.0422313702` (truncated). The Scientist run
+  had none. The no-change answer also said "has no change the tools can tell from noise", a paraphrase of "no change".
+- **0.1.5 (`3ee4f4a`).** Prompt adds "Copy every digit" with the truncation example, "`242199`, not `242,199`" (a comma only inside a quoted tool
+  display string), and forbids paraphrases of "no change". Fresh runs: all numbers matched whole-token in the three reference runs and the no-change run.
+  But the no-change answer added "Earlier runs: Past sessions found a drop starting 2026-10-14 using different windows", which no tool in that session
+  returned.
+- **Cause: Crew memory carries over between sessions.** Crew consolidates each finished dashboard session into the shared default memory store
+  (`~/.kiro/crew/memory.db`) and those memories reach later sessions. I found 17 CauseLens records there (episodic memories from the 0.1.2 runs, written
+  2026-11-24T04:01Z to 04:26Z, and semantic facts from the 0.1.3 Designer run, 2026-11-25T05:01Z), written with rounded, comma-formatted numbers such as
+  "1,646 lost orders" and "10,216 sessions per arm". So a "fresh session" here is a new slot, not a clean context: the 0.1.3 Designer run and the 0.1.4
+  and 0.1.5 runs may have seen them, and the added separators plausibly came from there (not shown). The 0.1.2 runs predate the first consolidation.
+  I did not delete the memories or change Crew's memory settings; that is the owner's state.
+- **0.1.6 (`90ee15a`).** Prompt adds "Only this conversation's tool results count": ignore memories or summaries of earlier sessions and never quote, compare with or
+  mention one. Focused checks: `tests/test_crew_app.py` and `tests/test_mcp_crew_fixes.py` 59 passed; `package_crew_app.py --check` up to date;
+  `kirocrew app update causelens` registered 3 agents; the installed prompts carry the rule.
+- **Fresh native runs on 0.1.6** (`POST /api/chat`, new slots, read back with `GET /api/chat/slots/<slot>`; saved in
+  `docs/crew-evidence/runs-0.1.6/`):
+  - Detective, reference: 24 numbers, all whole-token matches. It separates the whole-site change (-0.1841951235809724 pp) from mobile Safari's own
+    before/after change (-0.6576518919737058 pp), quotes `causal_attribution` `insufficient` with the tool's reason, and calls the two events date
+    coincidences.
+  - Scientist, reference: 39 numbers, all matched. It labels the segment change as "not the DiD effect", gives the DiD effect -0.6795934588411829 pp
+    (95% CI -0.7744021105243162 to -0.5847848071580497) with its assumptions and checks, and `moderate` with the tool's ambiguity cap.
+  - Designer, reference: 30 numbers, all matched. It opens with the tool's hypothesis verbatim. Its one comma-formatted number, "13,456 eligible sessions a
+    day", is from the tool's own `assumption` string.
+  - Detective, no-change data (swapped in, SHA-256 `0ea0e805...`, restored to `7c8fe719...` and hash-checked): 19 numbers, all matched, untruncated
+    (`0.01511106364801367`). It says "did not find a change ... that is distinguishable from noise", stops after `confirm_change`, and does not mention
+    earlier sessions.
+  - The 0.1.4 and 0.1.5 transcripts are kept as history in `runs-0.1.4/` and `runs-0.1.5/`.
+- **Limits.** The memory rule is a prompt instruction; the memories are still delivered, and one clean run does not show the agent will always ignore them.
+  The missing-day case was not re-run on 0.1.4 to 0.1.6 (prompt-only changes; its 0.1.2 run stands).
+- **Checks after the final code change (0.1.6):** full suite once, 1,402 passed (250 s); Ruff passed; `package_crew_app.py --check` up to date.
+  Still open: 5.1's session-menu export and 5.2's Kiro MCP-panel screenshot (owner actions in the UI), then 5.4.
+
+### Temporary Crew sessions, early-stop strength, per-candidate share sets (app 0.1.7)
+
+- **Setting.** Every new CauseLens chat is a Crew **temporary** session. In Crew 0.13.1 a temporary slot blocks memory reads
+  (`blocks_reads`: no memory-context injection) and memory writes (`is_restricted`: no consolidation or lessons), and Crew prefixes each
+  message with its "[TEMPORARY SESSION] ... no memory reads or writes" note. `memory.db`, the existing sessions and other apps' settings were
+  not touched; Crew's global memory settings are unchanged.
+  - **Embedded chat.** `ChatEmbed` has no memory-mode prop and creates a missing slot as persistent, so the page first creates a fresh slot
+    with `POST /api/chat/slots` `{name, agent, memory_mode: "temporary"}` (name `causelens-<agent>-<ms>-<8 hex>`, never a fixed key),
+    checks that Crew returned that key, that agent and `memory_mode: "temporary"`, and only then mounts `ChatEmbed` on it; otherwise it shows
+    the reason and mounts nothing. "New temporary session" makes another. `permissions.api` is unchanged: Crew matches `/api/chat` against
+    `/api/chat/slots` at a path boundary (`_api_pattern_matches`).
+  - **Full-chat launch.** `openChat({agent, message, autoSend: false, memoryMode: "temporary"})`, with no `slotKey`, so Crew opens a new draft
+    session in that mode.
+  - **Observed on the real dashboard** (headless Chrome, page loaded, each tab clicked, nothing sent): three `POST /api/chat/slots` with
+    `"memory_mode":"temporary"` (the host added `"embed_app":"causelens"`); the slot list then reports all three as `temporary`, 0 messages;
+    screenshots `07-temporary-*.png`. These three empty slots remain in the dashboard.
+- **Early-stop strength.** `confirm_change` now returns `causal_attribution` (`strength` always `insufficient`, `checks_run` empty, a fixed
+  `reason` per verdict, enforced by a validator), like the decomposition summary's. The not-distinguishable reason says "this does not show
+  that no change occurred". The Detective quotes it when it stops at step 5. Tests: `tests/test_confirm_change.py` (fixed reason per verdict;
+  a mismatched attribution is refused) and the confirm property test in `tests/test_change_properties.py`.
+- **Share confidence sets.** No code change: every `test_candidates` candidate already carries `timing.share_set` (`available`, `reason`,
+  `kind`, `pieces`, `level`) or `timing: null` with `timing_status`. The Scientist prompt now reports it for every candidate, rejected ones
+  included, quoting `reason` or `timing_status` when it is unavailable.
+- **Runs, once each, in fresh temporary sessions** (created by `POST /api/chat/slots` before the first message; create response and slot list
+  both `temporary`; session files record `"memory_mode": "temporary"`; saved in `docs/crew-evidence/runs-0.1.7-temporary/` with the check
+  under `_temporary_check`):
+  - Detective, reference: 27 numbers, all whole-token matches. Segment change and whole-site change kept apart; `decompose_change`
+    `causal_attribution` `insufficient` quoted.
+  - Scientist, reference: 49 numbers, all matched. Share sets for both candidates: Checkout v4.2 `0.31036226248816656` to
+    `1.4317526652958414`, Homepage hero refresh `-0.43175266529584155` to `0.6896377375118334` (bounded, 0.95). DiD effect labelled as
+    separate from the segment change; `moderate`, with the tool's cap reason.
+  - Designer, reference: 34 numbers, all matched; opens with the tool's hypothesis verbatim.
+  - Detective, no-change data (installed data swapped to `0ea0e805...`, restored to `7c8fe719...`, hash-checked): 26 numbers, all matched;
+    verdict `not_distinguishable_from_noise`; stopped; strength `insufficient` with `confirm_change`'s new reason quoted word for word.
+  - None of the four mentions an earlier session.
+- **Memory store.** Read-only counts of `memory.db` before and after the four runs are identical (13 episodic, 4 semantic, 18 events).
+  Crew consolidates after idle time (`history_idle_hours` 3.0), so equal counts right after the runs are expected either way. The block on
+  writes is Crew's documented `is_restricted` behaviour; I did not observe it directly. The "[TEMPORARY SESSION]" prefix is not stored in
+  the transcript, so it was not observed either.
+- **Checks after the final code change (0.1.7):** full suite once, 1,404 passed (244 s); Ruff passed; `package_crew_app.py --check` up to date.
+
+### UI guards, page send, session-menu export, Crew MCP probe (app 0.1.8; tasks 5.1, 5.2, 5.4)
+
+- **Guards (`3ca90b4`, app 0.1.8).** `checkCreatedSlot` requires `agent === choice.agent` exactly (a missing, null or numeric agent is
+  refused). The embed sends through `onSend`: `POST /api/chat?ws=1` with the default sender's fields (message, slot, agent, `embed_app`,
+  `meta` unchanged) plus `memory_mode: "temporary"` on every message; a refusal rejects and is never retried. Tests: a vanished slot is
+  recreated temporary (the default body would recreate it persistent), a mode mismatch is one 409 with no retry, a non-acceptance rejects.
+- **One page send in a fresh temporary Detective chat** (real dashboard, headless Chrome, message typed into the embed; saved in
+  `page-send-0.1.8/page-send.json`, screenshot `09-page-temporary-send.png`). Slot `causelens-detective-1795628017313-0ee13bf1` was created
+  with `"memory_mode":"temporary"`; the send was `POST /api/chat?ws=1` with `"memory_mode":"temporary"` and `meta.sendId`; the slot list
+  reported `temporary` before and after. The turn completed: "Dataset ID: `reference`", "Row count: `5888`" (the tool's `n_rows` is 5888).
+  The agent's first attempt named a tool that does not exist (`mcp_causelens_causelens_list_datasets`, "is not available", no MCP call); its
+  second, `@causelens:causelens/list_datasets`, was the one MCP call. Crew wrote no member activity record for this temporary session.
+- **Session-menu export (5.1).** The session is **historical, persistent and memory-enabled**: the 0.1.6 Detective run
+  `causelens-detective-run5-1795625230` (2026-11-25T16:47Z, before temporary sessions). In Crew 0.13.1 the session-options menu offers
+  "Export for import (JSON)" and "Export as readable Markdown" (screenshot `10-session-menu-export.png`); both were clicked with real mouse
+  events and downloaded: `checkout-conversion-drop-analysis-20261125T173648Z.kcsession.json.gz` (`GET .../export`) and
+  `...-20261125T173744Z.kcsession.md` (`GET .../export?format=md`), in `export-0.1.6-historical/`. Each export holds two messages, the
+  question and the final answer; tool rows are not in it (`layer_b_skipped: true`). The tool calls of the same session are in the slot
+  read-back `runs-0.1.6/detective-run5.json`. Activity: the Detective's Crew activity record for that session is saved
+  (`crew-activity-record.jsonl`, 2026-11-25T16:47:20Z, `via: chat`); there is no screenshot of an Activity page. The three agents are
+  separate sessions, not a parent with child sessions, so no child transcript exists. Crew refuses to export a temporary session
+  (`400 export_slot_not_persistent`), so the temporary-run evidence stays in `runs-0.1.7-temporary/` and `page-send-0.1.8/`, separate.
+- **Crew MCP evidence (5.2).** On Crew's MCP Servers page, before the probe `causelens:causelens` read Online, last probed 12:27 PM local
+  (set by an earlier page visit, not a click), 15 tools. "Probe MCP servers" was clicked at 2026-11-25T17:33:04Z (`POST /api/mcp/probe`);
+  it then read Online, last probed 12:33 PM, 15 tools: list_datasets, check_data_quality, confirm_change, detect_change_point,
+  daily_series, match_event_candidates, decompose_change, test_candidates, test_event_scope, estimate_did, check_pre_trends, run_placebo,
+  project_impact, power_analysis, design_experiment (`mcp-probe/mcp-probe.json`). Screenshot `08-crew-mcp-causelens-15-tools.png` was taken
+  in a second page load with no probe; before capture the home path in the page text was replaced by `~` (display only). This is Crew
+  evidence; it is not a Kiro CLI MCP-panel screenshot.
+- **Memory.** `memory.db` was neither edited nor cleaned. Its counts were unchanged across the page send (13 episodic, 4 semantic, 18
+  events). Crew's normal background consolidation of the older persistent sessions may add rows later; that is expected.
+- **Final checks (5.4), once, after the last source change (app 0.1.8):** full suite 1,404 passed (246 s); UI node tests 17 passed; Ruff passed; `package_crew_app.py --check` up to date. PR #13 stays draft and unmerged for the owner's final evidence review.

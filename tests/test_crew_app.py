@@ -1,0 +1,403 @@
+"""The installable Crew app under ``crew/causelens/`` (crew-app spec, tasks 2 and 3).
+
+These tests check the files and the launcher, not a Crew session. A passing run here is not evidence that Crew installed or ran the app;
+that evidence comes from the native steps recorded in ``KIRO_NOTES.md``.
+"""
+from __future__ import annotations
+
+import ast
+import asyncio
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from mcp import Client, StdioServerParameters
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import package_crew_app as packaging
+
+from causelens.agents.roles import DETECTIVE, EXPERIMENT_DESIGNER, SCIENTIST
+from causelens.mcp.tools import TOOL_NAMES
+from causelens.sim.generate import generate
+
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "crew" / "causelens"
+MANIFEST = json.loads((APP / "app.json").read_text())
+TEXT_SUFFIXES = {".json", ".md", ".py", ".txt", ".mjs", ".ts", ".tsx", ".csv", ".html"}
+
+
+def app_files() -> list[Path]:
+    return [p for p in sorted(APP.rglob("*")) if p.is_file() and "node_modules" not in p.parts and "__pycache__" not in p.parts]
+
+
+def agent(slug: str) -> dict:
+    return json.loads((APP / "agents" / f"{slug}.json").read_text())
+
+
+# --------------------------------------------------------------------------- generated parts
+
+def test_the_generated_parts_match_the_sources():
+    assert packaging.check() == []
+
+
+def test_the_runtime_hashes_match_package_json():
+    listed = json.loads((APP / "runtime" / "PACKAGE.json").read_text())["files"]
+    actual = {p.relative_to(APP / "runtime").as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in (APP / "runtime" / "causelens").rglob("*.py")}
+    assert listed == actual and len(listed) > 20
+
+
+def test_the_packaged_data_is_the_observed_reference_data():
+    metrics, _events, _ = generate(42)
+    assert (APP / "data" / "metrics_daily.csv").read_text() == metrics.to_csv(index=False)
+    assert (APP / "data" / "events.csv").read_bytes() == (ROOT / "data" / "events.csv").read_bytes()
+    assert hashlib.sha256((APP / "data" / "metrics_daily.csv").read_bytes()).hexdigest() == "7c8fe7196f23a9ba5b65b48ad3de8cc458c469d72c2f1ebc997e33509649f641"
+
+
+def test_the_answer_key_is_not_in_the_app():
+    names = [p.relative_to(APP).as_posix() for p in app_files()]
+    assert not [n for n in names if "ground_truth" in n]
+    for path in app_files():
+        if path.suffix in TEXT_SUFFIXES and path.name != "package-lock.json":
+            text = path.read_text(errors="ignore")
+            for needle in ("planted_cause", "true_effect_in_segment_pp", "must_identify_event", "data_quality_traps"):
+                assert needle not in text, (path, needle)
+    assert not (APP / "runtime" / "causelens" / "sim").exists()  # the simulator, whose source states the planted effect, is not shipped
+
+
+def test_the_runtime_is_only_what_the_server_imports():
+    shipped = {p.parent.name for p in (APP / "runtime" / "causelens").rglob("*.py") if p.parent.name != "causelens"}
+    assert shipped == {"analytics", "mcp"}
+    for path in (APP / "runtime" / "causelens").rglob("*.py"):
+        for line in path.read_text().splitlines():
+            m = re.match(r"\s*(?:from|import)\s+causelens\.(\w+)", line)
+            assert not m or m.group(1) in {"analytics", "mcp"}, (path, line)
+
+
+def test_the_requirements_cover_every_third_party_import_of_the_runtime():
+    declared = {re.split(r"[<>=!~ ]", line)[0].lower() for line in (APP / "requirements.txt").read_text().split() if line}
+    stdlib = set(sys.stdlib_module_names)
+    imported: set[str] = set()
+    for path in [*(APP / "runtime" / "causelens").rglob("*.py"), APP / "mcp_server.py"]:
+        for node in ast.walk(ast.parse(path.read_text())):  # real import statements only, not prose in docstrings
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) and node.level == 0 else []
+            for name in names:
+                top = (name or "").split(".")[0]
+                if top and top not in stdlib | {"causelens", "__future__"}:
+                    imported.add(top.lower())
+    assert imported <= declared, imported - declared
+    assert not {"pytest", "hypothesis", "ruff"} & declared  # runtime only
+
+
+# --------------------------------------------------------------------------- manifest, agents, prompts
+
+def test_the_manifest_has_its_required_fields_and_only_relative_contained_paths():
+    for key in ("name", "version", "displayName", "description"):
+        assert isinstance(MANIFEST[key], str) and MANIFEST[key].strip()
+    assert MANIFEST["name"] == "causelens" and re.match(r"\d+\.\d+\.\d+", MANIFEST["version"])
+    paths = [*MANIFEST["agents"], *MANIFEST["skills"], MANIFEST["iconPath"], "ui/" + MANIFEST["ui"]["entry"]]
+    for rel in paths:
+        assert not Path(rel).is_absolute() and ".." not in Path(rel).parts, rel
+        assert (APP / rel).exists(), rel
+    server = MANIFEST["mcpServers"]["causelens"]
+    assert server["command"] == "python3" and server["args"] == ["mcp_server.py"] and "env" not in server  # the one relative form Crew resolves
+    assert (APP / "ui" / MANIFEST["ui"]["entry"]).read_text().startswith("import ")
+
+
+def test_no_committed_file_needs_a_sandbox_or_personal_path():
+    pattern = re.compile(r"/projects/sandbox|/workspace/|/Users/[A-Za-z]|/home/[a-z]|C:\\\\Users")
+    for path in app_files():
+        if path.suffix in TEXT_SUFFIXES and path.name not in {"console.html", "package-lock.json"}:
+            hit = pattern.search(path.read_text(errors="ignore"))
+            assert hit is None, (path, hit and hit.group(0))
+    console = (APP / "ui" / "console.html").read_text()
+    assert not pattern.search(console)
+
+
+def test_each_agent_has_its_role_tools_and_an_app_contained_prompt():
+    expected = {"detective": DETECTIVE.tools, "scientist": SCIENTIST.tools, "experiment-designer": EXPERIMENT_DESIGNER.tools}
+    assert set(expected) == {Path(a).stem for a in MANIFEST["agents"]}
+    for slug, tools in expected.items():
+        spec = agent(slug)
+        names = {t.split("/", 1)[1] for t in spec["tools"]}
+        # Crew registers an app's server as "<app>:<server>" ("causelens:causelens"), so that is the name a tool ref must use
+        assert all(t.startswith("@causelens:causelens/") for t in spec["tools"]) and names <= set(TOOL_NAMES) and names == tools
+        assert spec["allowedTools"] == spec["tools"]  # every tool is read-only
+        assert spec["prompt"] == f"file://{{APP_ROOT}}/prompts/{slug}.md" and (APP / "prompts" / f"{slug}.md").is_file()
+        assert spec["name"] == f"causelens-{slug}"
+
+
+def test_the_role_tool_sets_follow_the_python_roles():
+    assert {t.split("/")[1] for t in agent("detective")["tools"]} == set(DETECTIVE.tools)  # refs are "@causelens:causelens/<tool>"
+    assert {t.split("/")[1] for t in agent("scientist")["tools"]} == set(SCIENTIST.tools)
+    assert {t.split("/")[1] for t in agent("experiment-designer")["tools"]} == set(EXPERIMENT_DESIGNER.tools)  # small-input design_experiment
+    assert set(TOOL_NAMES) == set(DETECTIVE.tools) | set(SCIENTIST.tools) | set(EXPERIMENT_DESIGNER.tools)  # all 15 are used by some agent
+
+
+def test_every_prompt_embeds_the_scientist_rules_verbatim_and_records_its_source():
+    rules = (ROOT / ".kiro" / "steering" / "scientist-rules.md").read_text(encoding="utf-8").strip()
+    source = json.loads((APP / "prompts" / "SOURCE.json").read_text())
+    assert source["sha256"] == hashlib.sha256((ROOT / ".kiro" / "steering" / "scientist-rules.md").read_bytes()).hexdigest()
+    assert re.fullmatch(r"[0-9a-f]{40}", source["last_commit"]) and source["path"] == ".kiro/steering/scientist-rules.md"
+    for slug in packaging.ROLES:
+        text = (APP / "prompts" / f"{slug}.md").read_text()
+        assert rules in text and source["sha256"][:12] in text
+        for must in ("never compute", "copied from a tool result", "Scientist rules"):
+            assert must.lower() in text.lower(), (slug, must)
+        for tool in packaging.ROLES[slug]["tools"]:  # type: ignore[union-attr]
+            assert f"`{tool}`" in text
+
+
+def test_the_prompts_do_not_state_the_planted_answer_or_the_reference_windows():
+    for path in (APP / "prompts").glob("*.md"):
+        text = path.read_text().split("## Scientist rules")[0]  # the rules are the steering file verbatim, and its own example mentions Safari
+        for planted in ("Checkout v4.2", "Homepage hero", "mobile", "safari", "2026-10", "2026-09-20", "-0.66"):
+            assert planted.lower() not in text.lower(), (path.name, planted)
+    skill = (APP / "skills" / "causelens-investigation" / "SKILL.md").read_text()
+    assert "Checkout v4.2" not in skill and "safari" not in skill.lower()
+
+
+def test_the_skill_names_the_three_agents_and_the_qualifications():
+    skill = (APP / "skills" / "causelens-investigation" / "SKILL.md").read_text()
+    for agent_name in ("causelens-detective", "causelens-scientist", "causelens-experiment-designer"):
+        assert agent_name in skill
+    for must in ("evidence strength", "lag", "alternative", "data-quality", "insufficient"):
+        assert must in skill.lower() or must in skill
+
+
+# --------------------------------------------------------------------------- the launcher from a copied location
+
+@pytest.fixture(scope="module")
+def copied_app(tmp_path_factory) -> Path:
+    """What Crew does on install: copy the app subtree elsewhere, without .venv, .git or node_modules."""
+    dest = tmp_path_factory.mktemp("installed") / "causelens"
+    shutil.copytree(APP, dest, ignore=shutil.ignore_patterns(".venv", ".git", "node_modules", "__pycache__"))
+    return dest
+
+
+def run_over_stdio(app: Path, cwd: Path, call):
+    """Start the copied launcher as a child process (no PYTHONPATH, another working directory) and speak MCP to it."""
+    params = StdioServerParameters(command=sys.executable, args=["mcp_server.py"], cwd=str(app), env={"PATH": "/usr/bin:/bin"})
+    del cwd
+
+    async def go():
+        async with Client(params) as client:
+            return await call(client)
+
+    return asyncio.run(go())
+
+
+def test_the_copied_launcher_serves_all_fifteen_tools_over_stdio(copied_app, tmp_path):
+    async def call(client):
+        tools = [t.name for t in (await client.list_tools()).tools]
+        catalog = await client.call_tool("list_datasets", {})
+        quality = await client.call_tool("check_data_quality", {"dataset_id": "reference"})
+        return tools, catalog.structured_content, quality.structured_content
+
+    tools, catalog, quality = run_over_stdio(copied_app, tmp_path, call)
+    assert sorted(tools) == sorted(TOOL_NAMES) and len(tools) == 15 and "daily_series" in tools
+    (dataset,) = catalog["datasets"]
+    assert dataset["id"] == "reference" and dataset["n_rows"] == 5888 and dataset["metrics_sha256"].startswith("7c8fe7196f23")
+    assert quality["excluded_dates"] == ["2026-09-20"]
+
+
+def test_the_copied_launcher_runs_the_packaged_code_not_the_source_checkout(copied_app):
+    probe = subprocess.run(
+        [sys.executable, "-c", "import runpy, sys; sys.argv=['mcp_server.py']; sys.path.insert(0, '.'); import mcp_server; import causelens; print(causelens.__file__)"],
+        cwd=copied_app, check=False, capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"}, timeout=120,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert Path(probe.stdout.strip()).resolve().is_relative_to(copied_app.resolve())
+
+
+def test_the_launcher_never_prints_to_stdout_except_protocol(copied_app):
+    proc = subprocess.run([sys.executable, "mcp_server.py"], cwd=copied_app, input="", check=False, capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"}, timeout=120)
+    assert proc.stdout == ""
+
+
+def test_the_copy_has_no_answer_key_for_the_server_to_serve(copied_app):
+    async def call(client):
+        return (await client.call_tool("list_datasets", {})).structured_content
+
+    catalog = run_over_stdio(copied_app, copied_app, call)
+    assert [d["id"] for d in catalog["datasets"]] == ["reference"]
+    assert not list(copied_app.rglob("*ground_truth*"))
+
+
+# --------------------------------------------------------------------------- the installed Crew release's own validators
+
+KIROCREW = shutil.which("kirocrew")
+needs_crew = pytest.mark.skipif(KIROCREW is None, reason="kirocrew is not installed on this machine")
+
+
+@needs_crew
+def test_crew_validates_the_agent_specs():
+    out = subprocess.run([KIROCREW, "agent", "validate", str(APP / "agents")], check=False, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0 and "0 problem(s)" in out.stdout + out.stderr
+
+
+@needs_crew
+def test_crew_resolves_every_agent_tool_ref_against_the_server_it_registers():
+    """Crew 0.13.1 namespaces an app's server as "<app>:<server>" and only warns (kiro-cli then silently mounts nothing) for a ref it
+    cannot resolve. Ask Crew's own resolver, with the server map Crew builds, whether any ref would dangle."""
+    python = Path(KIROCREW).resolve().parent / "python"
+    if not python.exists():
+        pytest.skip("cannot find Crew's interpreter next to its launcher")
+    servers = {f"{MANIFEST['name']}:{name}": spec for name, spec in MANIFEST["mcpServers"].items()}
+    for slug in ("detective", "scientist", "experiment-designer"):
+        spec = {**agent(slug), "mcpServers": servers}
+        code = ("import json, sys; from kiro_crew.apps.bridges_agents import _unresolvable_tool_refs; "
+                "print(json.dumps(_unresolvable_tool_refs(json.loads(sys.stdin.read()))))")
+        out = subprocess.run([str(python), "-c", code], input=json.dumps(spec), check=False, capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr[-2000:]
+        assert json.loads(out.stdout.strip().splitlines()[-1]) == [], (slug, out.stdout)
+
+
+@needs_crew
+def test_crew_loads_and_validates_the_manifest():
+    python = Path(KIROCREW).resolve().parent / "python"
+    if not python.exists():
+        pytest.skip("cannot find Crew's interpreter next to its launcher")
+    code = ("from pathlib import Path; from kiro_crew.apps.manifest import AppManifest; "
+            f"m = AppManifest.from_json_file(Path({str(APP / 'app.json')!r})); print(m.name, m.validate(Path({str(APP)!r})))")
+    out = subprocess.run([str(python), "-c", code], check=False, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0 and out.stdout.strip().endswith("causelens []"), out.stdout + out.stderr
+
+
+# --------------------------------------------------------------------------- the Crew page
+
+def test_the_page_labels_the_static_console_and_does_not_present_it_as_agent_output():
+    model = (APP / "ui" / "src" / "model.ts").read_text()
+    page = (APP / "ui" / "src" / "App.tsx").read_text()
+    assert "Static reference result" in model and "not the output of a native Crew agent" in model
+    assert "import consoleHtml from '../console.html?raw'" in page and "srcDoc={embedForSrcdoc(state.html)}" in page and 'sandbox=""' in page
+    assert "/apps/causelens/ui/console.html" not in model + page  # Crew 0.13.1's asset route answers 403 for .html
+    assert "STATIC_LABEL" in page
+    for source in (model, page):
+        assert "callTool" not in source and "/api/mcp" not in source  # no invented SDK method or route
+    for name in ("causelens-detective", "causelens-scientist", "causelens-experiment-designer"):
+        assert name in model and (APP / "agents" / f"{name.removeprefix('causelens-')}.json").is_file()
+
+
+def test_the_built_page_matches_the_source_imports():
+    built = (APP / "ui" / "dist" / "index.mjs").read_text()
+    assert 'from "@kirocrew/app-sdk"' in built and "ChatEmbed" in built and "useChatLauncher" in built and "Static reference result" in built
+    assert "srcDoc" in built and "CauseLens investigation" in built and 'href="#call-1"' in built  # the console is inlined in the bundle
+    assert "export {" in built and "default" in built
+    assert MANIFEST["permissions"]["api"] == ["/api/chat"]  # the chat embed's documented grant, nothing else
+
+
+def test_the_app_contains_no_credentials():
+    names = {p.name.lower() for p in app_files()}
+    assert not names & {".env", ".npmrc", ".pypirc", "credentials", "credentials.json", "id_rsa", ".netrc"}
+    secret = re.compile(r"AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|xox[abpr]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|secret://")
+    for path in app_files():
+        if path.suffix in TEXT_SUFFIXES:
+            hit = secret.search(path.read_text(errors="ignore"))
+            assert hit is None, (path, hit and hit.group(0)[:8])
+    for spec in (APP / "agents").glob("*.json"):
+        assert "env" not in json.loads(spec.read_text())
+    assert "env" not in MANIFEST["mcpServers"]["causelens"]
+
+
+# --------------------------------------------------------------------------- the page, rendered with test stubs (not Crew)
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(NODE is None or not (APP / "ui" / "node_modules" / "react").is_dir(),
+                    reason="needs node and `npm ci --legacy-peer-deps` in crew/causelens/ui")
+def test_the_ui_node_tests_pass():
+    """Runs crew/causelens/ui/test/: unit tests of src/model.ts and a render of the BUILT page against stub host modules (test/stubs/).
+    The stubs record what the page asks the host for; nothing here runs Crew, an agent or MCP."""
+    # explicit names: Node 24 does not expand a directory argument to --test. browser.test.mjs drives real headless Chrome over an HTTP
+    # parent page (still with the stub host, not Crew); it skips itself when no Chrome/Chromium is installed.
+    files = ["test/model.test.mjs", "test/page.test.mjs", "test/browser.test.mjs"]
+    assert json.loads((APP / "ui" / "package.json").read_text())["scripts"]["test"] == "node --test " + " ".join(files)
+    try:
+        out = subprocess.run([NODE, "--test", *files], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=150)
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        pytest.fail(f"the UI tests did not finish in 150 s; output so far:\n{partial[-4000:]}")
+    assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
+    passed = int(re.search(r"\bpass (\d+)", out.stdout).group(1))
+    skipped = int(re.search(r"\bskipped (\d+)", out.stdout).group(1))
+    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 17 and passed >= 15
+
+
+def test_the_built_bundle_is_current_with_its_source():
+    """The committed dist/index.mjs must come from the committed source: rebuild and compare, when the toolchain is installed."""
+    if NODE is None or not (APP / "ui" / "node_modules" / "vite").is_dir():
+        pytest.skip("needs `npm ci --legacy-peer-deps` in crew/causelens/ui")
+    before = (APP / "ui" / "dist" / "index.mjs").read_bytes()
+    out = subprocess.run(["npm", "run", "build"], cwd=APP / "ui", check=False, capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    assert (APP / "ui" / "dist" / "index.mjs").read_bytes() == before
+
+
+# --------------------------------------------------------------------------- the packaged server on data that should not yield a cause
+# These drive the packaged MCP server directly with the SDK client (as an agent's tool calls would arrive). They check what the tools
+# return to an agent; they do not run a native agent, so they say nothing about what an agent writes.
+
+def copy_with_data(tmp_path: Path, metrics) -> Path:
+    dest = tmp_path / "causelens"
+    shutil.copytree(APP, dest, ignore=shutil.ignore_patterns(".venv", ".git", "node_modules", "__pycache__"))
+    metrics.to_csv(dest / "data" / "metrics_daily.csv", index=False)
+    return dest
+
+
+def investigation_calls(app: Path):
+    async def call(client):
+        def body(r):
+            return r.structured_content if not r.is_error else {"error": " ".join(getattr(b, "text", "") for b in r.content)}
+
+        series = body(await client.call_tool("daily_series", {"dataset_id": "reference"}))
+        point = body(await client.call_tool("detect_change_point", {"dataset_id": "reference"}))
+        windows = {"pre_window": {"start": "2026-08-01", "end": "2026-10-13"}, "post_window": {"start": "2026-10-14", "end": "2026-10-31"}}
+        confirm = body(await client.call_tool("confirm_change", {"dataset_id": "reference", **windows}))
+        testing = body(await client.call_tool("test_candidates", {"dataset_id": "reference", **windows}))
+        return series, point, confirm, testing
+
+    return run_over_stdio(app, app, call)
+
+
+def test_with_no_change_in_the_data_the_tools_report_noise_and_support_nothing(tmp_path):
+    sys.path.insert(0, str(ROOT / "tests"))
+    from scenarios import simulate
+
+    metrics, _ = simulate(3, rel=0.0)
+    _series, _point, confirm, testing = investigation_calls(copy_with_data(tmp_path, metrics))
+    assert confirm["verdict"] == "not_distinguishable_from_noise" and confirm["stop_investigation"] is True
+    assert not [c for c in testing.get("candidates", []) if c["verdict"] == "supported"]
+
+
+def test_with_missing_days_the_tools_list_them_instead_of_filling_them(tmp_path):
+    metrics, _, _ = generate(42)
+    gone = ["2026-09-05", "2026-10-20"]
+    series, point, confirm, _testing = investigation_calls(copy_with_data(tmp_path, metrics[~metrics["date"].isin(gone)]))
+    assert series["missing_dates"] == gone and len(series["points"]) == 90
+    assert {str(d) for d in confirm["exclusions"]["missing_dates"]} == set(gone)
+    assert point["status"] in {"ok", "insufficient_data"}
+
+
+def test_the_prompts_carry_the_number_effect_and_noise_rules():
+    for slug in packaging.ROLES:
+        text = " ".join((APP / "prompts" / f"{slug}.md").read_text().split())
+        assert "Numbers are quoted exactly" in text and "Do not round, shorten, convert to percent or add thousands separators" in text
+        assert "not the difference-in-differences effect" in text and "Name which one every effect number is" in text
+        assert '"not distinguishable from noise"' in text and "Never write that there was \"no change\"" in text
+        assert "Copy every digit" in text and "(`242199`, not `242,199`)" in text
+        assert "nor a paraphrase such as" in text
+        assert "Only this conversation's tool results count" in text and "never quote, compare with or mention an earlier session" in text
+    designer = " ".join((APP / "prompts" / "experiment-designer.md").read_text().split())
+    assert "Open your answer with the tool's `hypothesis`, quoted verbatim" in designer and "caused or hurt" in designer
+    assert "settle which release hurt conversion" not in designer
+    detective = " ".join((APP / "prompts" / "detective.md").read_text().split())
+    assert "give the evidence strength by quoting the result's `causal_attribution`" in detective
+    scientist = " ".join((APP / "prompts" / "scientist.md").read_text().split())
+    assert "share confidence set from `timing.share_set`" in scientist and "Do this for every candidate, rejected ones included" in scientist
+    assert "its `timing_status` quoted" in scientist

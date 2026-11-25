@@ -21,6 +21,7 @@ from typing import Literal, ParamSpec, TypeVar
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import BaseModel, ConfigDict, RootModel
 
 from causelens.analytics import (
     CandidateMatchResult,
@@ -55,6 +56,10 @@ from causelens.analytics import project_impact as _project_impact
 from causelens.analytics import run_placebo as _run_placebo
 from causelens.analytics import test_candidates as _test_candidates
 from causelens.analytics import test_event_scope as _test_event_scope
+from causelens.analytics.decompose_summary import (
+    DecompositionSummary,
+    summarize_decomposition,
+)
 from causelens.analytics.loaders import DIMENSIONS
 from causelens.mcp.datasets import DatasetCatalog, DatasetError, DatasetRegistry
 from causelens.mcp.models import (
@@ -71,6 +76,7 @@ from causelens.mcp.models import (
     StrictFloat,
     StrictInt,
     strictly,
+    strictly_restoring,
 )
 from causelens.mcp.provenance import (
     require_candidate_result,
@@ -85,11 +91,48 @@ R = TypeVar("R")
 # Model-typed arguments are validated as strict JSON (see causelens.mcp.models.strictly); the published schemas are unchanged.
 QualityIn = strictly(DataQualityReport)
 DetectorIn = strictly(DetectorParams)
-ChangePointIn = strictly(ChangePointResult)
+# A change point copied into match_event_candidates gets its three known omitted empty containers restored (see strictly_restoring).
+ChangePointIn = strictly_restoring(ChangePointResult)
 DecompositionIn = strictly(DecompositionResult)
 CandidateTestingIn = strictly(CandidateTestingResult)
 DidIn = strictly(DidResult)
 PatternIn = strictly(ExpectedPattern)
+
+class CandidateTestSettings(BaseModel):
+    """The candidate-test settings ``design_experiment`` uses in its small-input mode (the same meaning and defaults as ``test_candidates``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    focal: SegmentSpec | None = None
+    candidates: list[str] | None = None
+    expected_patterns: dict[str, PatternIn] | None = None
+    lag_days: dict[str, StrictInt] | None = None
+    sensitivity_lags: tuple[StrictInt, ...] = (0, 1)
+    alpha: AlphaLevel = 0.05
+    level: AlphaLevel = 0.95
+    lead_days: StrictInt = 3
+    did_cov: Literal["cluster", "hc1"] = "hc1"
+
+
+CandidateSettingsIn = strictly(CandidateTestSettings)
+
+
+class DecomposeChangeOutput(RootModel[DecompositionResult | DecompositionSummary]):
+    """decompose_change's output: the full ``DecompositionResult`` (``detail="full"``, the default, unchanged on the wire) or the
+    ``DecompositionSummary`` (``detail="summary"``). A root model, so neither is wrapped; the schema is an object with the two alternatives."""
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):  # type: ignore[no-untyped-def]
+        """An object schema: ``anyOf`` the two results, with the properties both declare identically listed at the top level."""
+        schema = handler(core_schema)
+        schema = handler.resolve_ref_schema(schema) if "$ref" in schema else schema
+        alternatives = [handler.resolve_ref_schema(a) for a in schema.get("anyOf", [])]
+        common: dict = {}
+        if len(alternatives) == 2:
+            first, second = (a.get("properties", {}) for a in alternatives)
+            common = {k: v for k, v in first.items() if second.get(k) == v}
+        return {"type": "object", "properties": common, **schema}
+
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
@@ -286,19 +329,33 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
         fdr_family: Literal["scan", "partition"] = "scan",
         inference: Literal["day_level", "binomial"] = "day_level",
         min_days_per_window: StrictInt = 7,
-    ) -> DecompositionResult:
+        detail: Literal["full", "summary"] = "full",
+    ) -> DecomposeChangeOutput:
         """Where did the change happen? Rate and mix effects per segment, FDR-adjusted tests, and a localization.
 
         Describes where the change is concentrated, not why. Insufficient data is a normal result. Deterministic.
+
+        ``detail="full"`` (default) returns every segment of every partition (150-250 kB on the reference data). ``detail="summary"`` returns a
+        ``DecompositionSummary`` of about 10 kB: the windows, settings, exclusions and assumptions, the localization with each selected
+        segment's effect, interval, sample size and FDR-adjusted test, the selected share and the partition's remainder copied exactly, and
+        the reasons when nothing is localized. A summary is not accepted as a ``decomposition`` input; call ``test_candidates`` without one and
+        it recomputes the decomposition from the same dataset and windows.
         """
         data = registry.load(dataset_id)
         require_quality(quality, data)
-        return _decompose_change(
+        full = _decompose_change(
             data.metrics, pre_window.as_tuple(), post_window.as_tuple(), data.events, dimensions=dimensions,
             include_pairs=include_pairs, quality=quality, apply_exclusions=apply_exclusions, detector_params=detector_params,
             alpha=alpha, level=level, explain_threshold=explain_threshold, max_localized_traffic_share=max_localized_traffic_share,
             fdr_family=fdr_family, inference=inference, min_days_per_window=min_days_per_window,
         )
+        if detail == "full":
+            return DecomposeChangeOutput(full)
+        return DecomposeChangeOutput(summarize_decomposition(
+            full, dimensions=dimensions, include_pairs=include_pairs, explain_threshold=explain_threshold,
+            max_localized_traffic_share=max_localized_traffic_share, min_days_per_window=min_days_per_window,
+            apply_exclusions=apply_exclusions,
+        ))
 
     @tool
     @_guarded
@@ -494,8 +551,10 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     @_guarded
     def design_experiment(
         dataset_id: DatasetId,
-        candidate_testing: CandidateTestingIn,
         post_window: PostWindow,
+        candidate_testing: CandidateTestingIn | None = None,
+        pre_window: PreWindow | None = None,
+        candidate_settings: CandidateSettingsIn | None = None,
         quality: QualityIn | None = None,
         apply_exclusions: StrictBool = True,
         target_candidate: str | None = None,
@@ -507,15 +566,41 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     ) -> ExperimentDesign:
         """A randomized rollback experiment sized from the observed focal traffic. A planning aid, not a causal claim.
 
-        The population is the focal segment in ``candidate_testing``; the baseline and daily traffic come from
-        ``dataset_id`` over ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing. The
-        candidate-testing result must reproduce on this dataset (its exclusions, stored DiD and impact, and timing
-        analysis are recomputed and compared), so pass the ``dataset_id``, ``quality`` and ``apply_exclusions`` that
-        produced it; otherwise the call is refused and names the fields that differ.
+        Two ways to call it, never both:
+
+        * **Prior result:** pass ``candidate_testing``, the complete result of ``test_candidates``. It must reproduce on this dataset (its
+          exclusions, stored DiD and impact, and timing analysis are recomputed and compared), so pass the ``dataset_id``, ``quality`` and
+          ``apply_exclusions`` that produced it; otherwise the call is refused and names the fields that differ. A refused prior is never
+          replaced by a recomputation.
+        * **Small input:** omit ``candidate_testing`` and pass ``pre_window`` (and optionally ``candidate_settings``, the same settings
+          ``test_candidates`` takes). The candidate test is then run here on ``dataset_id`` over ``pre_window`` and ``post_window``, exactly as
+          ``test_candidates`` would run it, and the design is built from that result.
+
+        The population is the focal segment of the candidate test; the baseline and daily traffic come from ``dataset_id`` over
+        ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing.
         """
+        if candidate_testing is not None and (pre_window is not None or candidate_settings is not None):
+            raise ToolError(
+                "Ambiguous request: pass either candidate_testing (a prior test_candidates result) or pre_window with optional "
+                "candidate_settings (the candidate test is then run here), not both."
+            )
+        if candidate_testing is None and pre_window is None:
+            raise ToolError("design_experiment needs either candidate_testing (a prior test_candidates result) or pre_window to run the candidate test.")
         data = registry.load(dataset_id)
         require_quality(quality, data)
-        require_candidate_result(candidate_testing, data, quality, apply_exclusions)
+        if candidate_testing is not None:
+            require_candidate_result(candidate_testing, data, quality, apply_exclusions)
+        else:
+            if data.events is None:
+                raise ToolError(f"Dataset '{dataset_id}' has no event log, so there are no candidates to test.")
+            assert pre_window is not None
+            settings = candidate_settings or CandidateTestSettings()
+            candidate_testing = _test_candidates(
+                data.metrics, data.events, pre_window.as_tuple(), post_window.as_tuple(), focal=settings.focal, decomposition=None,
+                candidates=settings.candidates, expected_patterns=settings.expected_patterns, lag_days=settings.lag_days,
+                sensitivity_lags=settings.sensitivity_lags, alpha=settings.alpha, level=settings.level, quality=quality,
+                apply_exclusions=apply_exclusions, lead_days=settings.lead_days, did_cov=settings.did_cov,
+            )
         return _design_experiment(
             data.metrics, candidate_testing, post_window.as_tuple(), events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, target_candidate=target_candidate, arms=arms, mde_pp=mde_pp, alpha=alpha,

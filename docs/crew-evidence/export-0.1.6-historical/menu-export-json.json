@@ -1,0 +1,78 @@
+{
+ "requests": [
+  {
+   "t": "2026-11-25T17:36:48.530Z",
+   "method": "GET",
+   "url": "/api/chat/slots/causelens-detective-run5-1795625230/export"
+  }
+ ],
+ "title": "Checkout Conversion Drop Analysis",
+ "clicks": [
+  {
+   "label": "Export for import (JSON)",
+   "at": "2026-11-25T17:36:48.521Z",
+   "found": true
+  },
+  {
+   "label": "Export as readable Markdown",
+   "at": "2026-11-25T17:36:54.071Z",
+   "found": false
+  }
+ ],
+ "download": [
+  {
+   "method": "Browser.downloadWillBegin",
+   "frameId": "80AB27AE3EB34B88FFDBE38C37500E90",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "url": "blob:http://localhost:5476/75b4b5cb-9eb2-4e50-b616-d722b37fe7fa",
+   "suggestedFilename": "checkout-conversion-drop-analysis-20261125T173648Z.kcsession.json.gz"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 0,
+   "state": "inProgress"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 1802,
+   "state": "inProgress"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 1802,
+   "state": "inProgress"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 1802,
+   "state": "inProgress"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 1802,
+   "state": "inProgress"
+  },
+  {
+   "method": "Browser.downloadProgress",
+   "guid": "65fefbcc-e5d2-4efb-a09a-cb0d9842405f",
+   "totalBytes": 1802,
+   "receivedBytes": 1802,
+   "state": "completed",
+   "filePath": "runs/export/checkout-conversion-drop-analysis-20261125T173648Z.kcsession.json.gz"
+  }
+ ],
+ "files": [
+  "10-session-menu.png",
+  "checkout-conversion-drop-analysis-20261125T173648Z.kcsession.json.gz"
+ ]
+}

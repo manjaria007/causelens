@@ -289,6 +289,14 @@ OUTPUT_MODELS = {
 def test_output_schemas_are_generated_from_the_analytics_models(tools):
     for name, model in OUTPUT_MODELS.items():
         props = set(tools[name].output_schema["properties"])
+        if name == "decompose_change":  # detail="full" (the analytics model) or detail="summary" (DecompositionSummary)
+            from causelens.analytics.decompose_summary import DecompositionSummary
+
+            schema = tools[name].output_schema
+            alternatives = [schema["$defs"][a["$ref"].rsplit("/", 1)[1]] if "$ref" in a else a for a in schema["anyOf"]]
+            assert [set(a["properties"]) for a in alternatives] == [set(model.model_fields), set(DecompositionSummary.model_fields)]
+            assert props and props <= set(model.model_fields) & set(DecompositionSummary.model_fields)
+            continue
         if isinstance(model, str):  # the adapter's own catalog model
             assert props == {"datasets"}
         else:

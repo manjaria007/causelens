@@ -1,0 +1,14 @@
+{
+  "name": "causelens-experiment-designer",
+  "description": "CauseLens Experiment designer: recommends the randomized experiment that would settle what the data cannot, sized by the power tools.",
+  "prompt": "file://{APP_ROOT}/prompts/experiment-designer.md",
+  "model": "auto",
+  "tools": [
+    "@causelens:causelens/power_analysis",
+    "@causelens:causelens/design_experiment"
+  ],
+  "allowedTools": [
+    "@causelens:causelens/power_analysis",
+    "@causelens:causelens/design_experiment"
+  ]
+}

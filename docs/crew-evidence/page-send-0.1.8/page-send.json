@@ -1,0 +1,128 @@
+{
+ "requests": [
+  {
+   "t": "2026-11-25T17:33:37.316Z",
+   "path": "/api/chat/slots",
+   "body": {
+    "name": "causelens-detective-1795628017313-0ee13bf1",
+    "agent": "causelens-detective",
+    "memory_mode": "temporary",
+    "embed_app": "causelens"
+   }
+  },
+  {
+   "t": "2026-11-25T17:33:45.546Z",
+   "path": "/api/chat?ws=1",
+   "body": {
+    "message": "Call `list_datasets` once and report only the dataset ID and row count.",
+    "slot": "causelens-detective-1795628017313-0ee13bf1",
+    "agent": "causelens-detective",
+    "embed_app": "causelens",
+    "memory_mode": "temporary",
+    "meta": {
+     "sendId": "s-mwwekbsz-y24wkr"
+    }
+   }
+  }
+ ],
+ "slotKey": "causelens-detective-1795628017313-0ee13bf1",
+ "slotBefore": {
+  "key": "causelens-detective-1795628017313-0ee13bf1",
+  "agent": "causelens-detective",
+  "memory_mode": "temporary"
+ },
+ "typed": true,
+ "sentAt": "2026-11-25T17:33:45.547Z",
+ "slot": {
+  "key": "causelens-detective-1795628017313-0ee13bf1",
+  "title": "List Datasets ID and Row Count",
+  "running": false,
+  "admission_queued": false,
+  "turn": 1,
+  "turn_gen": "1142711f",
+  "stopping": false,
+  "stop_state": "idle",
+  "stop_declined": false,
+  "messages": [
+   {
+    "role": "user",
+    "content": "Call `list_datasets` once and report only the dataset ID and row count.",
+    "cls": "msg msg-u",
+    "ts": "2026-11-25T17:33:45.554212+00:00",
+    "meta": {
+     "sendId": "s-mwwekbsz-y24wkr",
+     "human": true,
+     "author": {
+      "id": "p_dda497926a972e1df0f48319a2c305a8",
+      "kind": "human",
+      "display": {
+       "name": "<device>",
+       "login": "",
+       "captured_at": null
+      }
+     },
+     "mid": "m-4a9f159d2b5247c4"
+    }
+   },
+   {
+    "role": "tool",
+    "content": "🔧 mcp_causelens_causelens_list_datasets",
+    "cls": "msg msg-tool",
+    "ts": "2026-11-25T17:33:47.167680+00:00",
+    "meta": {
+     "tool_call_id": "toolu_bdrk_017tn8x4hMNjB1PN3PkmQccW",
+     "purpose": "",
+     "input": "",
+     "kind": "other",
+     "mid": "m-9bc041c6744b4a29",
+     "done": true,
+     "output": "Tool \"mcp_causelens_causelens_list_datasets\" is not available."
+    }
+   },
+   {
+    "role": "tool",
+    "content": "🔧 @causelens:causelens/list_datasets",
+    "cls": "msg msg-tool",
+    "ts": "2026-11-25T17:33:48.003394+00:00",
+    "meta": {
+     "tool_call_id": "toolu_bdrk_01P5U5xDjMYJK5UTnF7J1Q7v",
+     "purpose": "",
+     "input": "{\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [],\n    \"_completedPaths\": []\n  }\n}",
+     "kind": "other",
+     "mcp_server": "causelens:causelens",
+     "mid": "m-7977f68d11524ca0",
+     "done": true,
+     "output": "{\n  \"datasets\": [\n    {\n      \"id\": \"reference\",\n      \"description\": \"\",\n      \"metrics_file\": \"metrics_daily.csv\",\n      \"events_file\": \"events.csv\",\n      \"metrics_sha256\": \"7c8fe7196f23a9ba5b65b48ad3de8cc458c469d72c2f1ebc997e33509649f641\",\n      \"events_sha256\": \"6611f41eb7d72f7bbc14643701c865e0492040e398f3ca018851950a0f7f38c8\",\n      \"n_rows\": 5888,\n      \"date_range\": [\n        \"2026-08-01\",\n        \"2026-10-31\"\n      ],\n      \"dimension_values\": {\n        \"device\": [\n          \"desktop\",\n          \"mobile\",\n          \"tablet\"\n        ],\n        \"browser\": [\n          \"chrome\",\n          \"edge\",\n          \"other\",\n          \"safari\"\n        ],\n        \"channel\": [\n          \"direct\",\n          \"email\",\n          \"organic\",\n          \"paid\"\n        ],\n        \"customer_type\": [\n          \"new\",\n          \"returning\"\n        ]\n      },\n      \"n_events\": 5\n    }\n  ]\n}"
+    }
+   },
+   {
+    "role": "assistant",
+    "content": "Dataset ID: `reference`\n\nRow count: `5888`",
+    "cls": "msg msg-a",
+    "ts": "2026-11-25T17:33:48.904643+00:00",
+    "meta": {
+     "mid": "m-8d67761063374663",
+     "turn_stats": {
+      "elapsed_ms": 3335,
+      "credits": 0.2171,
+      "model": "auto",
+      "ttft_ms": 3284
+     }
+    }
+   }
+  ],
+  "queue": [],
+  "total": 4,
+  "has_more": false,
+  "next_before": 0,
+  "context_pct": 3.1051002,
+  "context_stale": false,
+  "context_window_tokens": 1000000,
+  "context_used_tokens": 31051
+ },
+ "slotAfter": {
+  "key": "causelens-detective-1795628017313-0ee13bf1",
+  "agent": "causelens-detective",
+  "memory_mode": "temporary"
+ }
+}

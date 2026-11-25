@@ -1,0 +1,52 @@
+{
+ "requests": [
+  {
+   "t": "2026-11-25T17:38:22.182Z",
+   "method": "GET",
+   "path": "/api/mcp-gateway/status"
+  },
+  {
+   "t": "2026-11-25T17:38:25.923Z",
+   "method": "GET",
+   "path": "/api/mcp-gateway/status"
+  },
+  {
+   "t": "2026-11-25T17:38:26.041Z",
+   "method": "GET",
+   "path": "/api/mcp"
+  },
+  {
+   "t": "2026-11-25T17:38:26.042Z",
+   "method": "GET",
+   "path": "/api/mcp/scopes"
+  },
+  {
+   "t": "2026-11-25T17:38:26.044Z",
+   "method": "GET",
+   "path": "/api/mcp-gateway/servers"
+  },
+  {
+   "t": "2026-11-25T17:38:26.056Z",
+   "method": "GET",
+   "path": "/api/mcp-gateway/footprint"
+  },
+  {
+   "t": "2026-11-25T17:38:26.074Z",
+   "method": "GET",
+   "path": "/api/mcp/unreadable"
+  }
+ ],
+ "before": {
+  "status": "Online\nLast probed: 12:33 PM",
+  "probed": "Last probed: Nov 25, 2026, 12:33 PM",
+  "tools": "15 tools"
+ },
+ "after": {
+  "status": "Online\nLast probed: 12:33 PM",
+  "probed": "Last probed: Nov 25, 2026, 12:33 PM",
+  "tools": "15 tools"
+ },
+ "expanded": true,
+ "toolText": "15 tools\nlist_datasets\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ncheck_data_quality\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\nconfirm_change\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ndetect_change_point\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ndaily_series\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\nmatch_event_candidates\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ndecompose_change\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ntest_candidates\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ntest_event_scope\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\nestimate_did\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ncheck_pre_trends\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\nrun_placebo\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\nproject_impact\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\npower_analysis\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.\ndesign_experiment\nAlways allow\nStop asking before each call of this tool. Kiro Crew's own safety rules still apply.",
+ "redacted": 5
+}

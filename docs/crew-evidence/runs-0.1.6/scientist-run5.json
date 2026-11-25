@@ -1,0 +1,135 @@
+{
+ "key": "causelens-scientist-run5-1795625230",
+ "title": "Checkout Conversion Change Analysis",
+ "running": false,
+ "admission_queued": false,
+ "turn": 1,
+ "turn_gen": "1142711f",
+ "stopping": false,
+ "stop_state": "idle",
+ "stop_declined": false,
+ "messages": [
+  {
+   "role": "user",
+   "content": "Test the candidate explanations for the checkout conversion change in the reference dataset and estimate the effect of any supported candidate. The Detective's tools returned: dataset_id reference; baseline window 2026-08-01 to 2026-10-13; comparison window 2026-10-14 to 2026-10-31; excluded date 2026-09-20; change point plausible range 2026-10-14 to 2026-10-15; the change is concentrated in device=mobile, browser=safari; events coinciding with the onset: Checkout v4.2 (2026-10-14) and Homepage hero refresh (2026-10-13). Report only what your tools return.",
+   "cls": "msg msg-u",
+   "ts": "2026-11-25T16:47:12.712855+00:00",
+   "meta": {
+    "human": true,
+    "author": {
+     "id": "p_dda497926a972e1df0f48319a2c305a8",
+     "kind": "human",
+     "display": {
+      "name": "<device>",
+      "login": "",
+      "captured_at": null
+     }
+    },
+    "mid": "m-7f76fa0f863f46b8"
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/test_candidates",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:47:22.173251+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_01DAzfXDXDYwkuZruVAoYEuZ",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"pre_window\": {\n    \"start\": \"2026-08-01\",\n    \"end\": \"2026-10-13\"\n  },\n  \"post_window\": {\n    \"start\": \"2026-10-14\",\n    \"end\": \"2026-10-31\"\n  },\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"post_window\",\n      \"end\"\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"pre_window\",\n        \"start\"\n      ],\n      [\n        \"pre_window\",\n        \"end\"\n      ],\n      [\n        \"post_window\",\n        \"start\"\n      ],\n      [\n        \"post_window\",\n        \"end\"\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-c0b11472aa1b4790",
+    "done": true,
+    "output": "{\n  \"status\": \"ok\",\n  \"focal\": {\n    \"segments\": [\n      {\n        \"device\": \"mobile\",\n        \"browser\": \"safari\"\n      }\n    ],\n    \"source\": \"localization\",\n    \"label\": \"device=mobile, browser=safari\",\n    \"change_pp\": {\n      \"estimate\": -0.6576518919737058,\n      \"lower\": -0.7387859324300694,\n      \"upper\": -0.576517851517342,\n      \"level\": 0.95\n    },\n    \"change_significant\": true,\n    \"comparison\": \"all other traffic\"\n  },\n  \"onset_set\": [\n    \"2026-10-14\"\n  ],\n  \"onset_set_note\": \"plausible onset dates 2026-10-14 to 2026-10-14 from Task 3 on the focal series (an approximate likelihood-ratio set that undercovers for small effects)\",\n  \"candidates\": [\n    {\n      \"event\": \"Homepage hero refresh\",\n      \"event_type\": \"release\",\n      \"event_date\": \"2026-10-13\",\n      \"lag_days\": 0,\n      \"onset_date\": \"2026-10-13\",\n      \"verdict\": \"rejected\",\n      \"headline\": \"Homepage hero refresh: rejected as the sole immediate explanation (lag 0)\",\n      \"hypothesis\": \"The whole localized change begins on 2026-10-13, caused by Homepage hero refresh alone (no other logged event contributes).\",\n      \"reasons\": [\n        \"the timing contrast rejects Homepage hero refresh as the sole source of the change (t = -3.05 on 88 df, Holm-adjusted p = 0.00606); this does not mean it contributed nothing\"\n      ],\n      \"exposure\": {\n        \"scope\": \"all\",\n        \"status\": \"all_visitors\",\n        \"rejects\": false,\n        \"detail\": \"the event's exposure scope is all visitors, which never rules it out by location\"\n      },\n      \"pattern\": {\n        \"kind\": \"unspecified\",\n        \"status\": \"not_declared\",\n        \"detail\": \"no expected pattern was declared\",\n        \"scale\": null,\n        \"partitions\": [],\n        \"adjustment\": null,\n        \"outside_change_pp\": null,\n        \"absence_claimed\": false\n      },\n      \"location\": {\n        \"onset_date\": \"2026-10-13\",\n        \"onset_set\": [\n          \"2026-10-14\"\n        ],\n        \"onset_set_available\": true,\n        \"in_onset_set\": false,\n        \"note\": \"onset 2026-10-13 is outside the plausible onset set\"\n      },\n      \"timing\": {\n        \"name\": \"Homepage hero refresh\",\n        \"onset_date\": \"2026-10-13\",\n        \"status\": \"ok\",\n        \"unidentifiable_reason\": null,\n        \"coincident_with\": [],\n        \"step_pp\": {\n          \"estimate\": -0.08866475995249345,\n          \"lower\": -0.4661839526005088,\n          \"upper\": 0.2888544326955219,\n          \"level\": 0.95\n        },\n        \"step_std_error_pp\": 0.18996684848492779,\n        \"step_t\": -0.46673806856109545,\n        \"step_df\": 88,\n        \"step_p\": 0.6418407666419821,\n        \"step_p_holm\": 0.6418407666419821,\n        \"step_significant\": false,\n        \"direction_matches\": true,\n        \"sole_source\": {\n          \"statistic\": \"t\",\n          \"value\": -3.0493113163615653,\n          \"df1\": 1,\n          \"df2\": 88,\n          \"p_value\": 0.0030297345751675486,\n          \"p_value_holm\": 0.006059469150335097,\n          \"rejected\": true\n        },\n        \"share_set\": {\n          \"available\": true,\n          \"reason\": null,\n          \"kind\": \"bounded\",\n          \"pieces\": [\n            [\n              -0.43175266529584155,\n              0.6896377375118334\n            ]\n          ],\n          \"level\": 0.95\n        }\n      },\n      \"timing_status\": \"ok\",\n      \"multiplicity\": \"Holm across the candidate step tests, and separately across the sole-source tests\",\n      \"did_checks\": {\n        \"pre_trends\": {\n          \"status\": \"pass\",\n          \"reason\": null,\n          \"slope_difference_pp_per_day\": {\n            \"estimate\": 0.0004648604931824173,\n            \"lower\": -0.0020897877596721976,\n            \"upper\": 0.0030195087460370322,\n            \"level\": 0.95\n          },\n          \"p_value\": 0.7195705038279353,\n          \"n_days\": 72,\n          \"onset\": \"2026-10-13\",\n          \"criterion\": \"pass if p > 0.1, borderline if 0.05 <= p <= 0.1, fail if p < 0.05; needs 14+ pre-period days\"\n        },\n        \"placebo\": {\n          \"status\": \"pass\",\n          \"reason\": null,\n          \"placebos\": [\n            {\n              \"fake_date\": \"2026-08-28\",\n              \"effect_pp\": {\n                \"estimate\": -0.034133389510876466,\n                \"lower\": -0.13066640819320646,\n                \"upper\": 0.062399629171453544,\n                \"level\": 0.95\n              },\n              \"p_value\": 0.48301420374382226,\n              \"p_value_holm\": 0.6424341993347589\n            },\n            {\n              \"fake_date\": \"2026-09-10\",\n              \"effect_pp\": {\n                \"estimate\": 0.06054069443044334,\n                \"lower\": -0.03577473486611338,\n                \"upper\": 0.15685612372700006,\n                \"level\": 0.95\n              },\n              \"p_value\": 0.21414473311158627,\n              \"p_value_holm\": 0.6424341993347589\n            },\n            {\n              \"fake_date\": \"2026-09-23\",\n              \"effect_pp\": {\n                \"estimate\": 0.06720431093332203,\n                \"lower\": -0.0444637647222213,\n                \"upper\": 0.17887238658886537,\n                \"level\": 0.95\n              },\n              \"p_value\": 0.2340706765049033,\n              \"p_value_holm\": 0.6424341993347589\n            }\n          ],\n          \"n_attempted\": 3,\n          \"n_evaluated\": 3,\n          \"onset\": \"2026-10-13\",\n          \"criterion\": \"fail if any Holm-adjusted placebo p < 0.05; fake dates need 14+ days before and 7+ after inside the pre-period\"\n        }\n      },\n      \"lag_sensitivity\": [\n        {\n          \"lag_days\": 0,\n          \"onset_date\": \"2026-10-13\",\n          \"verdict\": \"rejected\",\n          \"headline\": \"Homepage hero refresh: rejected as the sole immediate explanation (lag 0)\",\n          \"declared\": true\n        },\n        {\n          \"lag_days\": 1,\n          \"onset_date\": \"2026-10-14\",\n          \"verdict\": \"inconclusive\",\n          \"headline\": \"Homepage hero refresh: inconclusive at lag 1 (its step is unidentifiable: its onset coincides with Checkout v4.2 at )\",\n          \"declared\": false\n        }\n      ],\n      \"attribution\": {\n        \"ambiguous\": true,\n        \"pairs\": [\n          {\n            \"first\": \"Homepage hero refresh\",\n            \"first_lag\": 1,\n            \"second\": \"Checkout v4.2\",\n            \"second_lag\": 0,\n            \"onset_date\": \"2026-10-14\"\n          }\n        ],\n        \"note\": \"release attribution is ambiguous: Homepage hero refresh at lag 1 and Checkout v4.2 at lag 0 both begin on 2026-10-14; their steps coincide, so the data cannot separate them\"\n      },\n      \"differential_effect\": null,\n      \"impact\": null,\n      \"evidence\": null\n    },\n    {\n      \"event\": \"Checkout v4.2\",\n      \"event_type\": \"release\",\n      \"event_date\": \"2026-10-14\",\n      \"lag_days\": 0,\n      \"onset_date\": \"2026-10-14\",\n      \"verdict\": \"supported\",\n      \"headline\": \"Checkout v4.2: supported under the immediate-effect assumption (lag 0)\",\n      \"hypothesis\": \"The whole localized change begins on 2026-10-14, caused by Checkout v4.2 alone (no other logged event contributes).\",\n      \"reasons\": [\n        \"onset 2026-10-14 is inside the plausible onset set\",\n        \"significant step in the direction of the change (Holm-adjusted p = 0.00606 over 2 step test(s), alpha = 0.05)\",\n        \"timing diagnostics ran and did not fail; pre-trend and placebo checks ran and did not fail\",\n        \"the sole-source hypothesis was not rejected\"\n      ],\n      \"exposure\": {\n        \"scope\": \"all\",\n        \"status\": \"all_visitors\",\n        \"rejects\": false,\n        \"detail\": \"the event's exposure scope is all visitors, which never rules it out by location\"\n      },\n      \"pattern\": {\n        \"kind\": \"unspecified\",\n        \"status\": \"not_declared\",\n        \"detail\": \"no expected pattern was declared\",\n        \"scale\": null,\n        \"partitions\": [],\n        \"adjustment\": null,\n        \"outside_change_pp\": null,\n        \"absence_claimed\": false\n      },\n      \"location\": {\n        \"onset_date\": \"2026-10-14\",\n        \"onset_set\": [\n          \"2026-10-14\"\n        ],\n     "
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/estimate_did",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:47:25.361669+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_01J3ReBz9NGcaErvvHrdm48G",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"focal\": [\n    {\n      \"device\": \"mobile\",\n      \"browser\": \"safari\"\n    }\n  ],\n  \"event_date\": \"2026-10-14\",\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"event_date\"\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"device\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"browser\"\n      ],\n      [\n        \"event_date\"\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-470117db26864456",
+    "done": true,
+    "output": "{\n  \"status\": \"ok\",\n  \"reason\": null,\n  \"event_date\": \"2026-10-14\",\n  \"effect_pp\": {\n    \"estimate\": -0.6795934588411829,\n    \"lower\": -0.7744021105243162,\n    \"upper\": -0.5847848071580497,\n    \"level\": 0.95\n  },\n  \"std_error_pp\": 0.047714981396977725,\n  \"p_value\": 1.1239990596357e-24,\n  \"degrees_of_freedom\": 89.0,\n  \"cov\": \"hc1\",\n  \"weights\": \"sessions\",\n  \"control_valid\": true,\n  \"n_days_pre\": 73,\n  \"n_days_post\": 18,\n  \"n_obs\": 182,\n  \"focal_sessions_post\": 242199,\n  \"comparison_sessions_post\": 558275,\n  \"excluded_dates\": [\n    \"2026-09-20\"\n  ],\n  \"assumptions\": [\n    \"Parallel trends: without the event the focal and comparison groups would have moved alike (checked on the pre-period, not proven).\",\n    \"The comparison group was not affected by the event; the estimate is a differential effect, equal to the focal segment's own effect only if that holds.\",\n    \"No other change hit the focal segment differently at about the same time (unlogged releases, traffic-mix shifts); a date coincidence is not a cause.\",\n    \"The effect is constant over the post period and across the focal segment.\"\n  ]\n}"
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/check_pre_trends",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:47:25.372866+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_019d5RP1yr1eubZzJt1bnH5V",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"focal\": [\n    {\n      \"device\": \"mobile\",\n      \"browser\": \"safari\"\n    }\n  ],\n  \"event_date\": \"2026-10-14\",\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"event_date\"\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"device\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"browser\"\n      ],\n      [\n        \"event_date\"\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-301d699b91594efc",
+    "done": true,
+    "output": "{\n  \"status\": \"pass\",\n  \"reason\": null,\n  \"slope_difference_pp_per_day\": {\n    \"estimate\": 0.0003483791581980378,\n    \"lower\": -0.002154617895770611,\n    \"upper\": 0.0028513762121666866,\n    \"level\": 0.95\n  },\n  \"p_value\": 0.7836070431454847,\n  \"n_days\": 73,\n  \"onset\": \"2026-10-14\",\n  \"criterion\": \"pass if p > 0.1, borderline if 0.05 <= p <= 0.1, fail if p < 0.05; needs 14+ pre-period days\"\n}"
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/run_placebo",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:47:25.558487+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_01HBH33YMTM1CDhK28LDPpcS",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"focal\": [\n    {\n      \"device\": \"mobile\",\n      \"browser\": \"safari\"\n    }\n  ],\n  \"event_date\": \"2026-10-14\",\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"event_date\"\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"device\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"browser\"\n      ],\n      [\n        \"event_date\"\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-2fb0effda6704c21",
+    "done": true,
+    "output": "{\n  \"status\": \"pass\",\n  \"reason\": null,\n  \"placebos\": [\n    {\n      \"fake_date\": \"2026-08-28\",\n      \"effect_pp\": {\n        \"estimate\": -0.03576330276766884,\n        \"lower\": -0.1314118034378791,\n        \"upper\": 0.059885197902541404,\n        \"level\": 0.95\n      },\n      \"p_value\": 0.4584050905621415,\n      \"p_value_holm\": 0.7090781793139974\n    },\n    {\n      \"fake_date\": \"2026-09-10\",\n      \"effect_pp\": {\n        \"estimate\": 0.05687013692929929,\n        \"lower\": -0.0380823034548369,\n        \"upper\": 0.1518225773134355,\n        \"level\": 0.95\n      },\n      \"p_value\": 0.2363593931046658,\n      \"p_value_holm\": 0.7090781793139974\n    },\n    {\n      \"fake_date\": \"2026-09-24\",\n      \"effect_pp\": {\n        \"estimate\": 0.06297060339042204,\n        \"lower\": -0.048569795282865105,\n        \"upper\": 0.17451100206370918,\n        \"level\": 0.95\n      },\n      \"p_value\": 0.2640879039129623,\n      \"p_value_holm\": 0.7090781793139974\n    }\n  ],\n  \"n_attempted\": 3,\n  \"n_evaluated\": 3,\n  \"onset\": \"2026-10-14\",\n  \"criterion\": \"fail if any Holm-adjusted placebo p < 0.05; fake dates need 14+ days before and 7+ after inside the pre-period\"\n}"
+   }
+  },
+  {
+   "role": "tool",
+   "content": "\ud83d\udd27 @causelens:causelens/project_impact",
+   "cls": "msg msg-tool",
+   "ts": "2026-11-25T16:47:34.984710+00:00",
+   "meta": {
+    "tool_call_id": "toolu_bdrk_01ACeq9hohpzkMMVf4LjmXJt",
+    "purpose": "",
+    "input": "{\n  \"dataset_id\": \"reference\",\n  \"focal\": [\n    {\n      \"device\": \"mobile\",\n      \"browser\": \"safari\"\n    }\n  ],\n  \"did\": {\n    \"status\": \"ok\",\n    \"reason\": null,\n    \"event_date\": \"2026-10-14\",\n    \"effect_pp\": {\n      \"estimate\": -0.6795934588411829,\n      \"lower\": -0.7744021105243162,\n      \"upper\": -0.5847848071580497,\n      \"level\": 0.95\n    },\n    \"std_error_pp\": 0.047714981396977725,\n    \"p_value\": 1.1239990596357e-24,\n    \"degrees_of_freedom\": 89,\n    \"cov\": \"hc1\",\n    \"weights\": \"sessions\",\n    \"control_valid\": true,\n    \"n_days_pre\": 73,\n    \"n_days_post\": 18,\n    \"n_obs\": 182,\n    \"focal_sessions_post\": 242199,\n    \"comparison_sessions_post\": 558275,\n    \"excluded_dates\": [\n      \"2026-09-20\"\n    ],\n    \"assumptions\": [\n      \"Parallel trends: without the event the focal and comparison groups would have moved alike (checked on the pre-period, not proven).\",\n      \"The comparison group was not affected by the event; the estimate is a differential effect, equal to the focal segment's own effect only if that holds.\",\n      \"No other change hit the focal segment differently at about the same time (unlogged releases, traffic-mix shifts); a date coincidence is not a cause.\",\n      \"The effect is constant over the post period and across the focal segment.\"\n    ]\n  },\n  \"_meta\": {\n    \"_isValid\": true,\n    \"_activePath\": [\n      \"did\",\n      \"assumptions\",\n      3\n    ],\n    \"_completedPaths\": [\n      [\n        \"dataset_id\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"device\"\n      ],\n      [\n        \"focal\",\n        0,\n        \"browser\"\n      ],\n      [\n        \"did\",\n        \"status\"\n      ],\n      [\n        \"did\",\n        \"reason\"\n      ],\n      [\n        \"did\",\n        \"event_date\"\n      ],\n      [\n        \"did\",\n        \"effect_pp\",\n        \"estimate\"\n      ],\n      [\n        \"did\",\n        \"effect_pp\",\n        \"lower\"\n      ],\n      [\n        \"did\",\n        \"effect_pp\",\n        \"upper\"\n      ],\n      [\n        \"did\",\n        \"effect_pp\",\n        \"level\"\n      ],\n      [\n        \"did\",\n        \"std_error_pp\"\n      ],\n      [\n        \"did\",\n        \"p_value\"\n      ],\n      [\n        \"did\",\n        \"degrees_of_freedom\"\n      ],\n      [\n        \"did\",\n        \"cov\"\n      ],\n      [\n        \"did\",\n        \"weights\"\n      ],\n      [\n        \"did\",\n        \"control_valid\"\n      ],\n      [\n        \"did\",\n        \"n_days_pre\"\n      ],\n      [\n        \"did\",\n        \"n_days_post\"\n      ],\n      [\n        \"did\",\n        \"n_obs\"\n      ],\n      [\n        \"did\",\n        \"focal_sessions_post\"\n      ],\n      [\n        \"did\",\n        \"comparison_sessions_post\"\n      ],\n      [\n        \"did\",\n        \"excluded_dates\",\n        0\n      ],\n      [\n        \"did\",\n        \"assumptions\",\n        0\n      ],\n      [\n        \"did\",\n        \"assumptions\",\n        1\n      ],\n      [\n        \"did\",\n        \"assumptions\",\n        2\n      ],\n      [\n        \"did\",\n        \"assumptions\",\n        3\n      ]\n    ]\n  }\n}",
+    "kind": "other",
+    "mcp_server": "causelens:causelens",
+    "mid": "m-9b46737e9d2243a6",
+    "done": true,
+    "output": "{\n  \"status\": \"ok\",\n  \"reason\": null,\n  \"overall_pp\": {\n    \"estimate\": -0.20562423781144132,\n    \"lower\": -0.23431044202170073,\n    \"upper\": -0.1769380336011819,\n    \"level\": 0.95\n  },\n  \"orders_change\": {\n    \"estimate\": -1645.9685613787565,\n    \"lower\": -1875.5941676687883,\n    \"upper\": -1416.3429550887247,\n    \"level\": 0.95\n  },\n  \"lost_orders\": {\n    \"estimate\": 1645.9685613787565,\n    \"lower\": 1416.3429550887247,\n    \"upper\": 1875.5941676687883,\n    \"level\": 0.95\n  },\n  \"focal_share_post\": 0.3025694775845312,\n  \"focal_sessions_post\": 242199,\n  \"total_sessions_post\": 800474,\n  \"n_days_post\": 18,\n  \"assumptions\": [\n    \"Assumes the comparison group was unaffected by the event; otherwise the differential effect understates (or overstates) the event's total effect on the overall metric and on orders.\",\n    \"Assumes the effect was constant over the post period and across the focal segment.\",\n    \"Uncertainty reflects the DiD estimate only; post-period traffic is taken as observed.\"\n  ]\n}"
+   }
+  },
+  {
+   "role": "assistant",
+   "content": "**Evidence strength: moderate.** The tool capped it from strong because the data cannot separate Checkout v4.2 from the Homepage hero refresh.\n\n**Where the drop is** (`test_candidates`)\n- It is in device=mobile, browser=safari.\n- That segment's own before/after change is -0.6576518919737058 pp (95% CI -0.7387859324300694 to -0.576517851517342).\n- This is not the DiD effect.\n- The plausible onset is 2026-10-14.\n- 2026-09-20 was excluded as a possible tracking issue. It coincides with the Analytics tag deploy.\n\n**Verdicts**\n\n| Event | Verdict | Why |\n|---|---|---|\n| Checkout v4.2 (2026-10-14), lag 0 | supported | Step test Holm p = 0.00606. Onset is in the plausible set. |\n| Checkout v4.2, lag 1 | rejected | Sole-source test failed at lag 1. |\n| Homepage hero refresh (2026-10-13), lag 0 | rejected | \"rejected as the sole immediate explanation (lag 0)\". Holm p = 0.00606. |\n| Homepage hero refresh, lag 1 | inconclusive | Its step cannot be told apart from Checkout v4.2. |\n\nThe tool says rejecting the hero refresh \"does not mean it contributed nothing\". It also says \"release attribution is ambiguous\". Hero refresh at lag 1 and Checkout v4.2 at lag 0 both start on 2026-10-14. The data cannot separate them.\n\nCheckout v4.2 share confidence set: 0.31036226248816656 to 1.4317526652958414.\n\n**Effect of Checkout v4.2** (`estimate_did`, mobile Safari vs all other traffic)\n- DiD effect: -0.6795934588411829 pp (95% CI -0.7744021105243162 to -0.5847848071580497).\n- It rests on 73 days before and 18 days after.\n- Focal sessions after: 242199. Comparison sessions after: 558275.\n\n**Checks**\n- Pre-trend: pass, p = 0.7836070431454847.\n- Placebo: pass. All three Holm p values are 0.7090781793139974.\n- Timing diagnostics: pass.\n\n**Effect on the whole site** (`project_impact`)\n- Overall conversion: -0.20562423781144132 pp (95% CI -0.23431044202170073 to -0.1769380336011819).\n- Lost orders over 18 days: 1645.9685613787565 (95% CI 1416.3429550887247 to 1875.5941676687883).\n- Mobile Safari was 0.3025694775845312 of the 800474 sessions after the change.\n\n**Assumptions**\n- Without the event, mobile Safari and other traffic would have moved alike. This was checked in the pre-period, not proven.\n- The comparison traffic was not affected by the event.\n- No other change hit mobile Safari differently at about that time.\n- The effect was constant over the post period and across the segment.\n\n**Other explanations the tool lists**\n- An unlogged change at the same time.\n- A traffic-mix or data-collection change.\n\n**What I could not establish**\n- Which of the two releases acted. Only a randomized rollback can settle it.\n\nUnder these assumptions, the tools show a differential effect of -0.6795934588411829 pp at lag 0 for Checkout v4.2. That is not a certain cause.",
+   "cls": "msg msg-a",
+   "ts": "2026-11-25T16:47:42.258301+00:00",
+   "meta": {
+    "mid": "m-9be351ddff2741ef",
+    "turn_stats": {
+     "elapsed_ms": 29539,
+     "credits": 0.9032,
+     "model": "auto",
+     "ttft_ms": 12517
+    }
+   }
+  }
+ ],
+ "queue": [],
+ "total": 7,
+ "has_more": false,
+ "next_before": 0,
+ "context_pct": 6.9321,
+ "context_stale": false,
+ "context_window_tokens": 1000000,
+ "context_used_tokens": 69321
+}

@@ -16,6 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from causelens.analytics import confirm_change, detect_change_point
+from causelens.analytics.confirm import ATTRIBUTION_REASONS
 
 COMMON = {"deadline": None, "derandomize": True}
 
@@ -79,6 +80,9 @@ def test_every_confirm_change_interval_is_ordered_and_consistent(seed, step, spl
     assert r.abs_change_pp.estimate == pytest.approx(100 * (r.post.conversion.estimate - r.pre.conversion.estimate))
     assert r.is_real == (r.noise_test.test_significant and r.noise_test.bootstrap_excludes_zero)
     assert r.stop_investigation == (not r.is_real)
+    # confirm_change never runs a causal check: its attribution is always insufficient, with the verdict's own fixed reason
+    assert r.causal_attribution.strength == "insufficient" and r.causal_attribution.checks_run == []
+    assert r.causal_attribution.reason == ATTRIBUTION_REASONS[r.verdict]
 
 
 @settings(max_examples=15, **COMMON)
