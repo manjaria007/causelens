@@ -28,4 +28,9 @@ kirocrew app install crew/causelens && kirocrew app enable causelens   # local, 
 kirocrew app dev causelens                                              # development mode
 ```
 
-or add the repository as an app registry (see `docs/crew-app.md`) and install it from Apps → Discover.
+Or add the repository's root `app-registry.json` as an app registry and install it from Apps → Discover. See the
+[repository run instructions](https://github.com/manjaria007/causelens#run-it-in-kiro-crew) and
+[native evidence](https://github.com/manjaria007/causelens/tree/main/docs/crew-evidence).
+
+New app chats use Crew's Temporary mode: stored memory is neither read nor learned from these sessions. Crew 0.13.1
+does not export Temporary sessions; the evidence index distinguishes their records from the historical persistent-session export.

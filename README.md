@@ -8,18 +8,41 @@ Built for Kiroween with spec-driven development in Kiro:
 - `.kiro/steering/` – product, tech and **scientist rules** every agent follows
 - `.kiro/specs/metric-investigation/` – requirements (EARS), design, task plan
 
+## Try it
+
+- **Live demo:** https://manjaria007.github.io/causelens/demo/ — the full investigation of the reference store, step by step
+- **Demo video:** `<YouTube link>`
+- **Kiro Crew app:** `crew/causelens/` — three agents investigating live on a hosted model
+
 ## Project status
 
-Implemented and merged: the synthetic dataset generator (Task 1), data loading and quality checks, change
-confirmation and change point, localization, candidate testing with a difference-in-differences estimate, and
-experiment design (Tasks 2 to 6), the read-only MCP server (Task 7), and the investigation orchestrator with its three
-roles and a traced, structured result (Task 8), the ground-truth evaluation (`python -m causelens.eval --seeds 20`,
-`docs/evaluation.md`, Task 9), and the investigation console (Task 10): `python -m causelens.ui --out console.html`
-writes a six-step page with an evidence panel for each step (`docs/console.md`). Method and measured behaviour are in `docs/`.
+Complete. All 10 tasks of the `metric-investigation` spec and all 5 tasks of the `crew-app` spec are merged.
 
-All ten metric-investigation implementation tasks are merged. The reference console is exported to
-[`docs/demo/index.html`](docs/demo/index.html). See [`docs/crew-handoff.md`](docs/crew-handoff.md) for Pages activation,
-the separate Crew app specification, and the native-session evidence that still needs to be captured.
+- Statistics engine: data quality, change confirmation and change point, localization, candidate testing with a
+  difference-in-differences estimate, and experiment design (`causelens/analytics/`, method notes in `docs/`)
+- MCP server with 15 read-only tools (`python -m causelens.mcp`, `docs/mcp-server.md`)
+- Orchestrator with three roles and a traced result (`causelens/agents/`, `docs/agents.md`)
+- Ground-truth evaluation over 20 simulated stores (`python -m causelens.eval --seeds 20`, `docs/evaluation.md`)
+- Investigation console (`python -m causelens.ui --out console.html`, `docs/console.md`)
+- Kiro Crew app (`crew/causelens/`); evidence from a real Crew install in `docs/crew-evidence/`
+
+## Run it in Kiro Crew
+
+With Kiro Crew installed (`kirocrew setup` and `kirocrew doctor` pass):
+
+```bash
+kirocrew app install crew/causelens
+kirocrew app enable causelens
+```
+
+Or add this repository's `app-registry.json` as an app registry and install CauseLens from Apps → Discover.
+Then open the CauseLens page, pick the Detective, and ask: "Why did checkout conversion fall?"
+
+## Use the MCP server in Kiro
+
+`.kiro/settings/mcp.json` starts the server with `scripts/mcp_stdio.sh`, which creates the virtual environment and
+generates the reference data on first run. Open the repository in Kiro and the `causelens` server lists 15 tools.
+The verified CLI connection and the separate Kiro Web attachment issue are documented in [`docs/mcp-server.md`](docs/mcp-server.md).
 
 The requirements, design, task plan, and steering files under `.kiro/` are authoritative. Preserve that directory and
 its development history. Tasks are run one parent task at a time in Kiro, each reviewed and tested before the next.
@@ -53,7 +76,9 @@ python -m causelens.sim.generate --seed 7 --out data/generated/seed-7
 - `causelens/mcp/`: read-only MCP server over the analytics (see `docs/mcp-server.md`)
 - `causelens/agents/`: investigation orchestration and traced reports
 - `causelens/ui/`: self-contained investigation console
+- `crew/causelens/`: installable Kiro Crew app with three native agents and its packaged MCP runtime
 - `docs/`: method, parameters, calibration results and limits for each task
+- `docs/crew-evidence/`: native Crew screenshots, transcripts and verification records
 - `data/`: reference metadata and locally generated metrics
 - `tests/`: pytest and Hypothesis tests, plus seeded calibration scripts in `tests/calibration/`
 
@@ -71,7 +96,7 @@ Run checks in this order while working on a task, and run the full suite once, a
 
 ```bash
 python -m pytest -q
-python -m ruff check causelens tests
+python -m ruff check causelens tests scripts crew
 ```
 
 The full suite takes several minutes, which is why it is not automated. A run that collects no tests (pytest exit
@@ -79,11 +104,10 @@ code 5) is not a passing result. Do not mark a task complete or begin the next t
 Commit and push each completed task separately, and record actual Kiro work in `KIRO_NOTES.md`.
 
 **Automation is Ruff only.** `.kiro/hooks/ruff-on-stop.json` runs `ruff check causelens tests` when the agent stops
-(a `Stop` trigger, which works in Kiro Web) and appends a record to `.pytest_cache/stop-hook-runs.log`. It does not run
-tests. File-save hooks do not run in Kiro Web, and the earlier hook that ran pytest on every save was removed. **No
-automatic execution of any hook has been observed in Kiro**, so the hook is configured but its activation is
-unverified. Running its command by hand is not evidence that Kiro fires it; the results recorded in `KIRO_NOTES.md`
-come from running the commands above directly.
+and appends a record to `.pytest_cache/stop-hook-runs.log`. Automatic execution was observed after native Kiro CLI
+turns on the Mac: timestamped start/end blocks record this checkout and `ruff_exit=0` in `KIRO_NOTES.md`.
+The hook does not run tests; the earlier pytest-on-save hook was removed. Crew's own hook settings are separate
+from this repository hook. Tests follow the targeted → integration → full-suite order above.
 
 ## The reference case
 
