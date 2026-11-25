@@ -17,8 +17,8 @@ All boxes start unchecked: cloud preparation is not native Kiro/Crew proof. Run 
 - [x] 4. Install and enable in Crew
   - [x] 4.1 Configure the documented opt-in registry and verify CauseLens appears in Apps → Discover
   - [x] 4.2 Install from Discover, review trust, enable, and run `kirocrew app dev causelens`
-- [ ] 5. Capture genuine proof
-  - [ ] 5.1 Run the reference question in Crew; capture Activity and export the parent/child transcript
-  - [ ] 5.2 Capture a native MCP screenshot showing fifteen tools
+- [x] 5. Capture genuine proof
+  - [x] 5.1 Run the reference question in Crew; capture Activity and export the transcript through the session menu (historical, persistent, memory-enabled 0.1.6 Detective session; Crew 0.13.1 exports no temporary session; the agents are separate sessions, so there is no parent/child pair)
+  - [x] 5.2 Capture Crew evidence of the CauseLens MCP server with fifteen tools: Crew's MCP Servers page after a probe, `causelens:causelens` Online with 15 tools including `daily_series` (not a Kiro CLI screenshot)
   - [x] 5.3 Observe a fresh automatic Stop-hook log block after a real native agent turn
-  - [ ] 5.4 Update `KIRO_NOTES.md`, run required final checks once, and open a reviewable PR
+  - [x] 5.4 Update `KIRO_NOTES.md`, run required final checks once, and open a reviewable PR (PR #13, draft and unmerged until the owner's final evidence review)

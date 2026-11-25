@@ -1294,3 +1294,36 @@ not perform are listed under "Not done" in the final block.
   writes is Crew's documented `is_restricted` behaviour; I did not observe it directly. The "[TEMPORARY SESSION]" prefix is not stored in
   the transcript, so it was not observed either.
 - **Checks after the final code change (0.1.7):** full suite once, 1,404 passed (244 s); Ruff passed; `package_crew_app.py --check` up to date.
+
+### UI guards, page send, session-menu export, Crew MCP probe (app 0.1.8; tasks 5.1, 5.2, 5.4)
+
+- **Guards (`3ca90b4`, app 0.1.8).** `checkCreatedSlot` requires `agent === choice.agent` exactly (a missing, null or numeric agent is
+  refused). The embed sends through `onSend`: `POST /api/chat?ws=1` with the default sender's fields (message, slot, agent, `embed_app`,
+  `meta` unchanged) plus `memory_mode: "temporary"` on every message; a refusal rejects and is never retried. Tests: a vanished slot is
+  recreated temporary (the default body would recreate it persistent), a mode mismatch is one 409 with no retry, a non-acceptance rejects.
+- **One page send in a fresh temporary Detective chat** (real dashboard, headless Chrome, message typed into the embed; saved in
+  `page-send-0.1.8/page-send.json`, screenshot `09-page-temporary-send.png`). Slot `causelens-detective-1795628017313-0ee13bf1` was created
+  with `"memory_mode":"temporary"`; the send was `POST /api/chat?ws=1` with `"memory_mode":"temporary"` and `meta.sendId`; the slot list
+  reported `temporary` before and after. The turn completed: "Dataset ID: `reference`", "Row count: `5888`" (the tool's `n_rows` is 5888).
+  The agent's first attempt named a tool that does not exist (`mcp_causelens_causelens_list_datasets`, "is not available", no MCP call); its
+  second, `@causelens:causelens/list_datasets`, was the one MCP call. Crew wrote no member activity record for this temporary session.
+- **Session-menu export (5.1).** The session is **historical, persistent and memory-enabled**: the 0.1.6 Detective run
+  `causelens-detective-run5-1795625230` (2026-11-25T16:47Z, before temporary sessions). In Crew 0.13.1 the session-options menu offers
+  "Export for import (JSON)" and "Export as readable Markdown" (screenshot `10-session-menu-export.png`); both were clicked with real mouse
+  events and downloaded: `checkout-conversion-drop-analysis-20261125T173648Z.kcsession.json.gz` (`GET .../export`) and
+  `...-20261125T173744Z.kcsession.md` (`GET .../export?format=md`), in `export-0.1.6-historical/`. Each export holds two messages, the
+  question and the final answer; tool rows are not in it (`layer_b_skipped: true`). The tool calls of the same session are in the slot
+  read-back `runs-0.1.6/detective-run5.json`. Activity: the Detective's Crew activity record for that session is saved
+  (`crew-activity-record.jsonl`, 2026-11-25T16:47:20Z, `via: chat`); there is no screenshot of an Activity page. The three agents are
+  separate sessions, not a parent with child sessions, so no child transcript exists. Crew refuses to export a temporary session
+  (`400 export_slot_not_persistent`), so the temporary-run evidence stays in `runs-0.1.7-temporary/` and `page-send-0.1.8/`, separate.
+- **Crew MCP evidence (5.2).** On Crew's MCP Servers page, before the probe `causelens:causelens` read Online, last probed 12:27 PM local
+  (set by an earlier page visit, not a click), 15 tools. "Probe MCP servers" was clicked at 2026-11-25T17:33:04Z (`POST /api/mcp/probe`);
+  it then read Online, last probed 12:33 PM, 15 tools: list_datasets, check_data_quality, confirm_change, detect_change_point,
+  daily_series, match_event_candidates, decompose_change, test_candidates, test_event_scope, estimate_did, check_pre_trends, run_placebo,
+  project_impact, power_analysis, design_experiment (`mcp-probe/mcp-probe.json`). Screenshot `08-crew-mcp-causelens-15-tools.png` was taken
+  in a second page load with no probe; before capture the home path in the page text was replaced by `~` (display only). This is Crew
+  evidence; it is not a Kiro CLI MCP-panel screenshot.
+- **Memory.** `memory.db` was neither edited nor cleaned. Its counts were unchanged across the page send (13 episodic, 4 semantic, 18
+  events). Crew's normal background consolidation of the older persistent sessions may add rows later; that is expected.
+- **Final checks (5.4), once, after the last source change (app 0.1.8):** full suite 1,404 passed (246 s); UI node tests 17 passed; Ruff passed; `package_crew_app.py --check` up to date. PR #13 stays draft and unmerged for the owner's final evidence review.

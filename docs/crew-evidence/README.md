@@ -23,3 +23,9 @@ Tool outputs inside a transcript are stored by Crew truncated to 8,000 character
 A new slot is not a clean context: Crew consolidates finished sessions into its shared memory store and later sessions can see those memories.
 Runs from the 0.1.3 Designer run onward may have seen memories of earlier runs. The 0.1.6 prompts tell the agents to ignore them.
 From app 0.1.7 every new CauseLens chat is temporary: Crew reads no stored memory into it and saves none from it.
+
+| File | What |
+|---|---|
+| `08-crew-mcp-causelens-15-tools.png`, `mcp-probe/` | Crew's MCP Servers page after "Probe MCP servers": `causelens:causelens` Online, 15 tools including `daily_series`. Crew evidence, not a Kiro CLI panel; the home path is shown as `~` |
+| `09-page-temporary-send.png`, `page-send-0.1.8/` | One message sent through the page's embed in a fresh temporary Detective chat (app 0.1.8): request carries `memory_mode: "temporary"`, slot stays temporary, answer completes |
+| `10-session-menu-export.png`, `export-0.1.6-historical/` | **Historical, persistent, memory-enabled** 0.1.6 Detective session exported through the session menu (JSON and Markdown), with its Crew activity record. Crew does not export temporary sessions |
