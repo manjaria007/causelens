@@ -392,6 +392,7 @@ def test_the_prompts_carry_the_number_effect_and_noise_rules():
         assert '"not distinguishable from noise"' in text and "Never write that there was \"no change\"" in text
         assert "Copy every digit" in text and "(`242199`, not `242,199`)" in text
         assert "nor a paraphrase such as" in text
+        assert "Only this conversation's tool results count" in text and "never quote, compare with or mention an earlier session" in text
     designer = " ".join((APP / "prompts" / "experiment-designer.md").read_text().split())
     assert "Open your answer with the tool's `hypothesis`, quoted verbatim" in designer and "caused or hurt" in designer
     assert "settle which release hurt conversion" not in designer

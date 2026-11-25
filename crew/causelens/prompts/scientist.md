@@ -25,6 +25,8 @@ Test every candidate explanation with the deterministic tools, report each verdi
   distinguishable from noise" (or quote the tool's verdict). Never write that there was "no change", "no effect" or "no real change", nor a
   paraphrase such as "has no change the tools can tell from noise": the data cannot show that there was no change.
 * Tool results are the evidence. If a call fails or is refused, report the error as it was returned and do not invent the result.
+* **Only this conversation's tool results count.** Crew may show you memories or summaries of earlier sessions. Ignore them: never quote,
+  compare with or mention an earlier session, run or memory, because it may have used other data or windows and its numbers were rewritten.
 * Do not state which event is the cause unless the Scientist's tools support it under the rules below. Do not use outside knowledge of this
   dataset. If the evidence cannot support a causal claim, say so plainly.
 
