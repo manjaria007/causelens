@@ -15,5 +15,5 @@ export function useChatLauncher() {
 
 // Records the scoped API requests the page makes. Under react-dom/server effects do not run, so a render posts nothing.
 export function useAppApi() {
-  return { post: async (path, body) => { calls.api.push({ path, body }); return { key: body?.name, memory_mode: body?.memory_mode } } }
+  return { post: async (path, body) => { calls.api.push({ path, body }); return { key: body?.name, memory_mode: body?.memory_mode, agent: body?.agent } } }
 }

@@ -82,8 +82,8 @@ export function checkCreatedSlot(choice: AgentChoice, name: string, slot: unknow
   if (s.memory_mode !== MEMORY_MODE) {
     return { kind: 'refused', detail: `Crew reported memory mode ${JSON.stringify(s.memory_mode ?? null)} for ${name}, not temporary; it is not used.` }
   }
-  if (typeof s.agent === 'string' && s.agent !== choice.agent) {
-    return { kind: 'refused', detail: `Crew bound ${name} to ${s.agent}, not ${choice.agent}; it is not used.` }
+  if (s.agent !== choice.agent) {
+    return { kind: 'refused', detail: `Crew bound ${name} to ${JSON.stringify(s.agent ?? null)}, not ${choice.agent}; it is not used.` }
   }
   return { kind: 'ready', slotKey: name, memoryMode: MEMORY_MODE }
 }
@@ -101,6 +101,50 @@ export async function openTemporarySession(
     return { kind: 'refused', detail: `Crew refused to create a temporary session: ${err instanceof Error ? err.message : String(err)}` }
   }
   return checkCreatedSlot(choice, name, slot)
+}
+
+/** The app name Crew knows this page by; the embed's default sender sends it as `embed_app`. */
+export const APP_NAME = 'causelens'
+/** The path the embed's default sender posts to. */
+export const CHAT_SEND_PATH = '/api/chat?ws=1'
+
+/** What `ChatEmbed` hands an `onSend` host: forwarded unchanged as `meta`, as the default sender does. */
+export interface EmbedSendMeta {
+  sendId?: string
+  files?: string[]
+  pastes?: unknown[]
+}
+
+/**
+ * The body of one chat send. Same fields as the embed's default sender (message, slot, agent, embed_app, meta), plus
+ * `memory_mode: "temporary"` on every message: if the verified slot has disappeared, Crew recreates it as temporary rather than persistent,
+ * and if a slot under this key exists in another mode, Crew refuses the send instead of running it.
+ */
+export function temporarySendBody(slotKey: string, choice: AgentChoice, message: string, meta?: EmbedSendMeta) {
+  return { message, slot: slotKey, agent: choice.agent, embed_app: APP_NAME, memory_mode: MEMORY_MODE, ...(meta ? { meta } : {}) }
+}
+
+/** Whether Crew accepted a send, read as the embed's default sender reads it (`ok`, `queued` or a `work` receipt). */
+function accepted(reply: unknown): boolean {
+  if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return false
+  const r = reply as Record<string, unknown>
+  return Boolean(r.ok || r.queued || r.work)
+}
+
+/**
+ * The `onSend` transport for one verified temporary slot. Every send carries the temporary mode. A refusal (an HTTP error such as a 409
+ * memory-mode mismatch, or a reply that is not an acceptance) rejects, so the embed shows it and hands the text back. It is never retried,
+ * with or without the mode.
+ */
+export function temporarySender(post: (path: string, body: unknown) => Promise<unknown>, slotKey: string, choice: AgentChoice) {
+  return async (message: string, meta?: EmbedSendMeta): Promise<unknown> => {
+    const reply = await post(CHAT_SEND_PATH, temporarySendBody(slotKey, choice, message, meta))
+    if (!accepted(reply)) {
+      const error = reply && typeof reply === 'object' ? (reply as Record<string, unknown>).error : undefined
+      throw new Error(typeof error === 'string' && error ? error : 'Crew did not accept the message.')
+    }
+    return reply
+  }
 }
 
 /** The full-chat launch: no slotKey, so Crew opens a NEW session in temporary mode with the starter as an unsent draft. */

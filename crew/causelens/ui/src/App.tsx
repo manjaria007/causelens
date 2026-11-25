@@ -14,6 +14,7 @@ import {
   freshSlotName,
   launchOptions,
   openTemporarySession,
+  temporarySender,
   type AgentChoice,
   type AgentKey,
   type ConsoleState,
@@ -65,14 +66,14 @@ function useTemporarySessions() {
     },
     [api],
   )
-  return { sessions, start }
+  return { sessions, start, api }
 }
 
 function AgentChat() {
   const [key, setKey] = useState<AgentKey>(DEFAULT_AGENT)
   const choice = agentFor(key)
   const { openChat } = useChatLauncher()
-  const { sessions, start } = useTemporarySessions()
+  const { sessions, start, api } = useTemporarySessions()
   const session = sessions[key]
   useEffect(() => {
     if (!session) start(choice)
@@ -110,7 +111,14 @@ function AgentChat() {
             <p className="text-sm text-muted mb-2">
               Temporary session <code>{session.slotKey}</code>: Crew reads no stored memory into it and saves none from it.
             </p>
-            <ChatEmbed key={session.slotKey} slotKey={session.slotKey} agent={choice.agent} placeholder={choice.starter} startAtBottom />
+            <ChatEmbed
+              key={session.slotKey}
+              slotKey={session.slotKey}
+              agent={choice.agent}
+              placeholder={choice.starter}
+              startAtBottom
+              onSend={temporarySender((path, body) => api.post(path, body), session.slotKey, choice)}
+            />
           </>
         )}
       </PanelBoundary>

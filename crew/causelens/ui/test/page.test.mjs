@@ -21,6 +21,7 @@ test('the page mounts no chat until a fresh temporary session exists, and never 
   assert.match(html, /role="tablist"/)
   assert.equal((html.match(/role="tab"/g) || []).length, 3)
   assert.ok(built.includes('/api/chat/slots') && built.includes('memory_mode') && built.includes('memoryMode'))
+  assert.ok(built.includes('/api/chat?ws=1') && /onSend:/.test(built), 'the embed sends through the temporary transport')
   for (const fixed of ['"causelens-detective"', '"causelens-scientist"', '"causelens-experiment-designer"']) {
     assert.ok(!built.includes(`slotKey: ${fixed}`), `no fixed slot key ${fixed}`)
   }

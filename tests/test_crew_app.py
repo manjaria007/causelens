@@ -326,7 +326,7 @@ def test_the_ui_node_tests_pass():
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
     passed = int(re.search(r"\bpass (\d+)", out.stdout).group(1))
     skipped = int(re.search(r"\bskipped (\d+)", out.stdout).group(1))
-    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 13 and passed >= 11
+    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 17 and passed >= 15
 
 
 def test_the_built_bundle_is_current_with_its_source():
