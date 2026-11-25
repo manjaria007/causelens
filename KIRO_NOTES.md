@@ -1327,3 +1327,13 @@ not perform are listed under "Not done" in the final block.
 - **Memory.** `memory.db` was neither edited nor cleaned. Its counts were unchanged across the page send (13 episodic, 4 semantic, 18
   events). Crew's normal background consolidation of the older persistent sessions may add rows later; that is expected.
 - **Final checks (5.4), once, after the last source change (app 0.1.8):** full suite 1,404 passed (246 s); UI node tests 17 passed; Ruff passed; `package_crew_app.py --check` up to date. PR #13 stays draft and unmerged for the owner's final evidence review.
+
+### Submission documentation preparation (Codex, November 25, 2026)
+
+- PR #13 subsequently merged as `d57e4b7`; the implementation and Crew evidence checklists are complete. Older entries above describe their own review stage.
+- The owner confirmed that `https://manjaria007.github.io/causelens/demo/` opens. This is the exported reference investigation, not a hosted live-agent endpoint.
+- Applied the owner's README replacement for Try it, project status, Crew installation and MCP use. The video URL is still an explicit placeholder because no published URL has been supplied. Updated the stale hook paragraph to reflect observed automatic native Kiro CLI runs.
+- Prepared owner-review drafts in `docs/submission/`: Devpost description/Crew bonus text, Kiro usage write-up, video storyboard and final submission checklist. These are documentation prepared by Codex, not new Kiro implementation or a submitted Devpost entry.
+- Checked the official Kiroween 2026 rules: deadline December 4 at 2:00 PM PST; the intended submission buffer is December 3. Best Demo consideration has no extra entry step. The Crew-bonus entry text and prize-table wording about a separate repository need clarification; no eligibility guarantee or new repository is claimed.
+- Updated the old Crew handoff to describe reproduction of the completed app, correct export/menu provenance and the recorded Crew MCP screenshot. Statistical code, reference data, steering, specifications and generated app/runtime assets are unchanged.
+- Documentation checks only; no repeat of the full suite or calibration for prose changes. Recording, video publication, owner review and Devpost submission remain pending.
