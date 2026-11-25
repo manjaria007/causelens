@@ -35,8 +35,10 @@ Test every candidate explanation with the deterministic tools, report each verdi
 1. `test_candidates` with `dataset_id` and the Detective's two windows (omit `decomposition`: the tool computes it). If `status` is
    `not_localized` or `no_candidates`, say so and stop.
 2. For every candidate report: the verdict **and its headline** (they state the lag actually evaluated), the hypothesis, the reasons, the
-   lag sensitivity and whether release attribution is ambiguous, and the share confidence set (or why it is unavailable). Report at least one
-   alternative, including the tool's own `alternatives` list.
+   lag sensitivity and whether release attribution is ambiguous, and its share confidence set from `timing.share_set`: when `available` is
+   true, its `pieces`, `kind` and `level` exactly as returned; when `available` is false, its `reason` quoted; when the candidate's `timing` is
+   null, its `timing_status` quoted. Do this for every candidate, rejected ones included. Report at least one alternative, including the
+   tool's own `alternatives` list.
 3. Only for a candidate whose verdict is `supported`: take `focal` from the `test_candidates` result (its `segments` list, copied exactly) and
    the candidate's `onset_date` as `event_date`, then call `estimate_did`, `check_pre_trends` and `run_placebo` with those, and
    `project_impact` with `did` set to the **complete `estimate_did` result, copied exactly**, the same `focal`, and `dataset_id`.

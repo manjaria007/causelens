@@ -1,5 +1,5 @@
-import { Component, useState, type ReactNode } from 'react'
-import { ChatEmbed, useChatLauncher } from '@kirocrew/app-sdk'
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChatEmbed, useAppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { Btn, Card, CardTitle, EmptyState, PageHeader } from '@kirocrew/app-sdk/ui'
 import { FileWarning } from 'lucide-react'
 import {
@@ -11,9 +11,13 @@ import {
   agentFor,
   consoleStateFrom,
   embedForSrcdoc,
-  slotKeyFor,
+  freshSlotName,
+  launchOptions,
+  openTemporarySession,
+  type AgentChoice,
   type AgentKey,
   type ConsoleState,
+  type TemporarySession,
 } from './model'
 // The packaged console (generated into ui/console.html by scripts/package_crew_app.py), inlined as text by Vite at build time.
 import consoleHtml from '../console.html?raw'
@@ -36,10 +40,43 @@ class PanelBoundary extends Component<{ what: string; children: ReactNode }, { e
   }
 }
 
+type SessionState = { kind: 'creating' } | TemporarySession
+
+function nonce(): string {
+  const bytes = new Uint8Array(4)
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** One fresh temporary session per agent tab, created when the tab is first shown or when the person asks for a new one. */
+function useTemporarySessions() {
+  const api = useAppApi()
+  const [sessions, setSessions] = useState<Partial<Record<AgentKey, SessionState>>>({})
+  const inFlight = useRef(new Set<AgentKey>())
+  const start = useCallback(
+    (choice: AgentChoice) => {
+      if (inFlight.current.has(choice.key)) return
+      inFlight.current.add(choice.key)
+      setSessions((s) => ({ ...s, [choice.key]: { kind: 'creating' } }))
+      const name = freshSlotName(choice.key, Date.now(), nonce())
+      openTemporarySession((path, body) => api.post(path, body), choice, name)
+        .then((result) => setSessions((s) => ({ ...s, [choice.key]: result })))
+        .finally(() => inFlight.current.delete(choice.key))
+    },
+    [api],
+  )
+  return { sessions, start }
+}
+
 function AgentChat() {
   const [key, setKey] = useState<AgentKey>(DEFAULT_AGENT)
   const choice = agentFor(key)
   const { openChat } = useChatLauncher()
+  const { sessions, start } = useTemporarySessions()
+  const session = sessions[key]
+  useEffect(() => {
+    if (!session) start(choice)
+  }, [key, session, start, choice])
   return (
     <Card>
       <CardTitle>Investigate with the native agents</CardTitle>
@@ -62,12 +99,24 @@ function AgentChat() {
         <strong>{choice.label}</strong> ({choice.agent}): {choice.role}
       </p>
       <PanelBoundary what="chat">
-        <ChatEmbed key={choice.key} slotKey={slotKeyFor(choice.key)} agent={choice.agent} placeholder={choice.starter} startAtBottom />
+        {(!session || session.kind === 'creating') && <p className="text-sm text-muted">Creating a new temporary session…</p>}
+        {session?.kind === 'refused' && (
+          <p role="alert" className="text-sm">
+            {session.detail}
+          </p>
+        )}
+        {session?.kind === 'ready' && (
+          <>
+            <p className="text-sm text-muted mb-2">
+              Temporary session <code>{session.slotKey}</code>: Crew reads no stored memory into it and saves none from it.
+            </p>
+            <ChatEmbed key={session.slotKey} slotKey={session.slotKey} agent={choice.agent} placeholder={choice.starter} startAtBottom />
+          </>
+        )}
       </PanelBoundary>
-      <div className="mt-2">
-        <Btn onClick={() => openChat({ agent: choice.agent, message: choice.starter, autoSend: false })}>
-          Open {choice.label} in a full chat (draft, not sent)
-        </Btn>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Btn onClick={() => start(choice)}>New temporary {choice.label} session</Btn>
+        <Btn onClick={() => openChat(launchOptions(choice))}>Open {choice.label} in a full temporary chat (draft, not sent)</Btn>
       </div>
     </Card>
   )

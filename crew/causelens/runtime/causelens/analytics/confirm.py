@@ -34,7 +34,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy import stats
 
 from causelens.analytics.data_quality import DataQualityReport, DetectorParams
@@ -106,6 +106,41 @@ class DataNeeded(BaseModel):
     note: str
 
 
+Verdict = Literal["real_change", "not_distinguishable_from_noise", "insufficient_data"]
+
+#: The fixed reason for each verdict. ``confirm_change`` never runs a causal check, so the strength is always ``insufficient``.
+ATTRIBUTION_REASONS: dict[str, str] = {
+    "real_change": (
+        "insufficient for a causal attribution: confirm_change tests whether the before/after change is distinguishable from noise, "
+        "not why it happened; no identification design (difference-in-differences with pre-trend and placebo checks) and no "
+        "candidate test has run in this call."
+    ),
+    "not_distinguishable_from_noise": (
+        "insufficient for a causal attribution: the change is not distinguishable from noise at this evidence level, so no cause "
+        "can be attributed and the investigation stops here; this does not show that no change occurred. No identification design "
+        "and no candidate test has run."
+    ),
+    "insufficient_data": (
+        "insufficient for a causal attribution: the windows have too few usable days to test the change, so no cause can be "
+        "attributed and the investigation stops here. No identification design and no candidate test has run."
+    ),
+}
+
+
+class ConfirmAttribution(BaseModel):
+    """What confirm_change can say about why the change happened: nothing. Fixed per verdict, so an agent that stops here quotes it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    strength: Literal["insufficient"] = "insufficient"
+    reason: str
+    checks_run: list[str] = Field(default_factory=list, description="Causal checks run by this tool: none.")
+
+
+def attribution_for(verdict: Verdict) -> ConfirmAttribution:
+    return ConfirmAttribution(reason=ATTRIBUTION_REASONS[verdict])
+
+
 class ConfirmChangeResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -121,8 +156,11 @@ class ConfirmChangeResult(BaseModel):
     )
     noise_test: NoiseTest | None
     is_real: bool
-    verdict: Literal["real_change", "not_distinguishable_from_noise", "insufficient_data"]
+    verdict: Verdict
     stop_investigation: bool = Field(description="True unless the change is real (Requirement 2.3).")
+    causal_attribution: ConfirmAttribution = Field(
+        description="Evidence strength for a causal claim from this tool alone: always insufficient, with the verdict's fixed reason."
+    )
     data_needed: DataNeeded | None
     weekday_mix_difference: float | None = Field(
         description="Total-variation distance between the windows' weekday mixes (0 = identical)."
@@ -132,6 +170,12 @@ class ConfirmChangeResult(BaseModel):
     seed: int
     assumptions: list[str]
     summary: str
+
+    @model_validator(mode="after")
+    def _attribution_matches_verdict(self) -> ConfirmChangeResult:
+        if self.causal_attribution != attribution_for(self.verdict):
+            raise ValueError("causal_attribution must be the fixed attribution for this verdict")
+        return self
 
 
 # --------------------------------------------------------------------------- helpers
@@ -305,6 +349,7 @@ def confirm_change(
             is_real=False,
             verdict="insufficient_data",
             stop_investigation=True,
+            causal_attribution=attribution_for("insufficient_data"),
             data_needed=None,
             weekday_mix_difference=None,
             exclusions=disclosure,
@@ -480,6 +525,7 @@ def confirm_change(
         is_real=is_real,
         verdict="real_change" if is_real else "not_distinguishable_from_noise",
         stop_investigation=not is_real,
+        causal_attribution=attribution_for("real_change" if is_real else "not_distinguishable_from_noise"),
         data_needed=data_needed,
         weekday_mix_difference=mix_gap,
         exclusions=disclosure,

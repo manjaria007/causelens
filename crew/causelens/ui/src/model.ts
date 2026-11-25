@@ -46,9 +46,66 @@ export function agentFor(key: string): AgentChoice {
   return AGENTS.find((a) => a.key === key) ?? AGENTS[0]
 }
 
-/** One chat session per agent, owned by this page, so switching agents does not mix their transcripts. */
-export function slotKeyFor(key: AgentKey): string {
-  return `causelens-${key}`
+/**
+ * Every CauseLens chat is a Crew **temporary** session: Crew neither injects stored memories into it nor consolidates it into memory
+ * afterwards, so one investigation cannot carry another's numbers or windows into its answer.
+ *
+ * `ChatEmbed` has no memory-mode prop and creates a missing slot as persistent, so the page creates a fresh slot first, through
+ * `POST /api/chat/slots` with `memory_mode: "temporary"`, checks the mode Crew reports back, and only then mounts the embed on that key.
+ * An existing session is never reused: each slot name is new.
+ */
+export const MEMORY_MODE = 'temporary' as const
+
+/** A new slot name for one agent: never one an earlier page view or session used. */
+export function freshSlotName(key: AgentKey, now: number, nonce: string): string {
+  return `causelens-${key}-${now}-${nonce}`
+}
+
+export interface SlotCreateRequest {
+  name: string
+  agent: string
+  memory_mode: typeof MEMORY_MODE
+}
+
+export function temporarySlotRequest(choice: AgentChoice, name: string): SlotCreateRequest {
+  return { name, agent: choice.agent, memory_mode: MEMORY_MODE }
+}
+
+export type TemporarySession =
+  | { kind: 'ready'; slotKey: string; memoryMode: typeof MEMORY_MODE }
+  | { kind: 'refused'; detail: string }
+
+/** Accept a created slot only if Crew reports it under the requested name, for this agent, in temporary mode. */
+export function checkCreatedSlot(choice: AgentChoice, name: string, slot: unknown): TemporarySession {
+  const s = (slot && typeof slot === 'object' ? slot : {}) as Record<string, unknown>
+  if (s.key !== name) return { kind: 'refused', detail: `Crew did not return the new session ${name}; it is not used.` }
+  if (s.memory_mode !== MEMORY_MODE) {
+    return { kind: 'refused', detail: `Crew reported memory mode ${JSON.stringify(s.memory_mode ?? null)} for ${name}, not temporary; it is not used.` }
+  }
+  if (typeof s.agent === 'string' && s.agent !== choice.agent) {
+    return { kind: 'refused', detail: `Crew bound ${name} to ${s.agent}, not ${choice.agent}; it is not used.` }
+  }
+  return { kind: 'ready', slotKey: name, memoryMode: MEMORY_MODE }
+}
+
+/** Create the temporary slot and check it. A failed request is reported as it was returned, and no chat is mounted. */
+export async function openTemporarySession(
+  post: (path: string, body: unknown) => Promise<unknown>,
+  choice: AgentChoice,
+  name: string,
+): Promise<TemporarySession> {
+  let slot: unknown
+  try {
+    slot = await post('/api/chat/slots', temporarySlotRequest(choice, name))
+  } catch (err) {
+    return { kind: 'refused', detail: `Crew refused to create a temporary session: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  return checkCreatedSlot(choice, name, slot)
+}
+
+/** The full-chat launch: no slotKey, so Crew opens a NEW session in temporary mode with the starter as an unsent draft. */
+export function launchOptions(choice: AgentChoice) {
+  return { agent: choice.agent, message: choice.starter, autoSend: false, memoryMode: MEMORY_MODE }
 }
 
 /**

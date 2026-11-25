@@ -39,7 +39,7 @@ ROLES: dict[str, dict[str, object]] = {
     "detective": {
         "title": "Detective",
         "tools": ["list_datasets", "check_data_quality", "daily_series", "confirm_change", "detect_change_point", "match_event_candidates", "decompose_change"],
-        "strength_source": "`causal_attribution` in the `decompose_change` summary; never a label of your own",
+        "strength_source": "`causal_attribution` from `confirm_change` when you stop there, otherwise from the `decompose_change` summary; never a label of your own",
         "job": (
             "Check the data first (a tracking break is a valid explanation), confirm the change is real, find when it started and where it is "
             "concentrated. Describe when and where. Do not say why: that is for the Scientist."
@@ -53,7 +53,8 @@ ROLES: dict[str, dict[str, object]] = {
    the earliest plausible onset date; the comparison window runs from the earliest plausible onset date to the last date of the data. Dates
    are written `YYYY-MM-DD`. (Counting back one calendar day is date handling, not statistics.)
 5. `confirm_change` with those windows. If its verdict is not `real_change`, or its status is `insufficient_data`, stop and report that, with
-   the tool's own "data needed" figures. Do not continue.
+   the tool's own "data needed" figures, and give the evidence strength by quoting the result's `causal_attribution` (its `strength` and
+   `reason`) word for word. Do not continue.
 6. `match_event_candidates` with `change_point` set to the **complete result object of `detect_change_point`, copied exactly**.
 7. `decompose_change` with the same windows and `detail` set to `"summary"` (the full result is far too large to read). Report from the summary:
    the localization (`localization.partition`, `localization.segments`, `selected_share_of_change`, `traffic_share_post`), each selected
@@ -78,8 +79,10 @@ event names that coincide with it. Pass numbers by quoting them, never by recomp
 1. `test_candidates` with `dataset_id` and the Detective's two windows (omit `decomposition`: the tool computes it). If `status` is
    `not_localized` or `no_candidates`, say so and stop.
 2. For every candidate report: the verdict **and its headline** (they state the lag actually evaluated), the hypothesis, the reasons, the
-   lag sensitivity and whether release attribution is ambiguous, and the share confidence set (or why it is unavailable). Report at least one
-   alternative, including the tool's own `alternatives` list.
+   lag sensitivity and whether release attribution is ambiguous, and its share confidence set from `timing.share_set`: when `available` is
+   true, its `pieces`, `kind` and `level` exactly as returned; when `available` is false, its `reason` quoted; when the candidate's `timing` is
+   null, its `timing_status` quoted. Do this for every candidate, rejected ones included. Report at least one alternative, including the
+   tool's own `alternatives` list.
 3. Only for a candidate whose verdict is `supported`: take `focal` from the `test_candidates` result (its `segments` list, copied exactly) and
    the candidate's `onset_date` as `event_date`, then call `estimate_did`, `check_pre_trends` and `run_placebo` with those, and
    `project_impact` with `did` set to the **complete `estimate_did` result, copied exactly**, the same `focal`, and `dataset_id`.

@@ -8,6 +8,7 @@ import pytest
 from frames import bounded_series, day, to_frame
 
 from causelens.analytics import DataValidationError, confirm_change
+from causelens.analytics.confirm import ATTRIBUTION_REASONS, ConfirmAttribution
 
 PRE = ("2026-08-01", "2026-10-13")
 POST = ("2026-10-14", "2026-10-31")
@@ -378,3 +379,25 @@ def test_a_wider_level_never_gives_a_narrower_interval():
         iv = confirm_change(df, (day(0), day(27)), (day(28), day(55)), level=level, n_bootstrap=400, seed=2).abs_change_pp
         widths.append(iv.upper - iv.lower)
     assert widths == sorted(widths)
+
+
+# ------------------------------------------------------------------ evidence strength for an early stop
+
+
+def test_every_verdict_carries_a_fixed_insufficient_attribution(reference, result):
+    metrics, events = reference
+    assert result.verdict == "real_change"
+    assert result.causal_attribution.strength == "insufficient"
+    assert result.causal_attribution.reason == ATTRIBUTION_REASONS["real_change"]
+    short = confirm_change(metrics, ("2026-09-14", "2026-09-20"), ("2026-09-21", "2026-09-27"), events)
+    assert short.causal_attribution.reason == ATTRIBUTION_REASONS["insufficient_data"]
+    noise = ATTRIBUTION_REASONS["not_distinguishable_from_noise"]
+    assert "not distinguishable from noise" in noise and "does not show that no change occurred" in noise
+    for reason in ATTRIBUTION_REASONS.values():
+        assert reason.startswith("insufficient for a causal attribution") and "caused" not in reason
+
+
+def test_an_attribution_that_does_not_match_the_verdict_is_refused(result):
+    wrong = ConfirmAttribution(reason=ATTRIBUTION_REASONS["not_distinguishable_from_noise"])
+    with pytest.raises(ValueError, match="fixed attribution for this verdict"):
+        type(result).model_validate({**result.model_dump(), "causal_attribution": wrong.model_dump()})

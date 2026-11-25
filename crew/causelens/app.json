@@ -1,6 +1,6 @@
 {
   "name": "causelens",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "displayName": "CauseLens",
   "description": "An AI investigator for business metrics. Three native agents (Detective, Scientist, Experiment designer) use read-only deterministic analytics over MCP to confirm a change, locate and localize it, test logged events, estimate impact with uncertainty, and recommend the experiment that would settle what the data cannot. Ships a small reference dataset.",
   "author": "manjaria007",

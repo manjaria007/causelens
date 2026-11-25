@@ -326,7 +326,7 @@ def test_the_ui_node_tests_pass():
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
     passed = int(re.search(r"\bpass (\d+)", out.stdout).group(1))
     skipped = int(re.search(r"\bskipped (\d+)", out.stdout).group(1))
-    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 10 and passed >= 8
+    assert re.search(r"\bfail 0\b", out.stdout) and passed + skipped == 13 and passed >= 11
 
 
 def test_the_built_bundle_is_current_with_its_source():
@@ -396,3 +396,8 @@ def test_the_prompts_carry_the_number_effect_and_noise_rules():
     designer = " ".join((APP / "prompts" / "experiment-designer.md").read_text().split())
     assert "Open your answer with the tool's `hypothesis`, quoted verbatim" in designer and "caused or hurt" in designer
     assert "settle which release hurt conversion" not in designer
+    detective = " ".join((APP / "prompts" / "detective.md").read_text().split())
+    assert "give the evidence strength by quoting the result's `causal_attribution`" in detective
+    scientist = " ".join((APP / "prompts" / "scientist.md").read_text().split())
+    assert "share confidence set from `timing.share_set`" in scientist and "Do this for every candidate, rejected ones included" in scientist
+    assert "its `timing_status` quoted" in scientist

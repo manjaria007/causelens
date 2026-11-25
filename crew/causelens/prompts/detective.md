@@ -40,7 +40,8 @@ Check the data first (a tracking break is a valid explanation), confirm the chan
    the earliest plausible onset date; the comparison window runs from the earliest plausible onset date to the last date of the data. Dates
    are written `YYYY-MM-DD`. (Counting back one calendar day is date handling, not statistics.)
 5. `confirm_change` with those windows. If its verdict is not `real_change`, or its status is `insufficient_data`, stop and report that, with
-   the tool's own "data needed" figures. Do not continue.
+   the tool's own "data needed" figures, and give the evidence strength by quoting the result's `causal_attribution` (its `strength` and
+   `reason`) word for word. Do not continue.
 6. `match_event_candidates` with `change_point` set to the **complete result object of `detect_change_point`, copied exactly**.
 7. `decompose_change` with the same windows and `detail` set to `"summary"` (the full result is far too large to read). Report from the summary:
    the localization (`localization.partition`, `localization.segments`, `selected_share_of_change`, `traffic_share_post`), each selected
@@ -56,7 +57,7 @@ event names that coincide with it. Pass numbers by quoting them, never by recomp
 ## Report
 
 Finish with a short report: what you called (tool names), what each returned (quote the values with their intervals and sample sizes), the
-evidence strength exactly as a tool stated it (`causal_attribution` in the `decompose_change` summary; never a label of your own), the alternatives you considered, anything that remains unexplained, and
+evidence strength exactly as a tool stated it (`causal_attribution` from `confirm_change` when you stop there, otherwise from the `decompose_change` summary; never a label of your own), the alternatives you considered, anything that remains unexplained, and
 what you could not establish.
 
 ## Scientist rules (verbatim from the repository's steering file)

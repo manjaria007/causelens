@@ -12,15 +12,18 @@ test('the built bundle imports only the host SDK, react and lucide', () => {
   assert.ok(!built.includes('/apps/causelens/ui/console.html'), 'Crew 0.13.1 refuses .html on the app asset route')
 })
 
-test('the page mounts a native ChatEmbed for the selected agent, defaulting to the Detective', () => {
-  assert.equal(calls.chatEmbed.length, 1)
-  const props = calls.chatEmbed[0]
-  assert.equal(props.agent, 'causelens-detective')
-  assert.equal(props.slotKey, 'causelens-detective')
-  assert.equal(props.onSend, undefined)  // the embed's own documented send path (POST /api/chat)
+test('the page mounts no chat until a fresh temporary session exists, and never reuses a fixed session key', () => {
+  // Under react-dom/server effects do not run: the slot is not created yet, so no ChatEmbed may be mounted.
+  assert.equal(calls.chatEmbed.length, 0)
+  assert.equal(calls.api.length, 0)
+  assert.match(text, /Creating a new temporary session/)
   for (const label of ['Detective', 'Scientist', 'Experiment designer']) assert.ok(text.includes(label), label)
   assert.match(html, /role="tablist"/)
   assert.equal((html.match(/role="tab"/g) || []).length, 3)
+  assert.ok(built.includes('/api/chat/slots') && built.includes('memory_mode') && built.includes('memoryMode'))
+  for (const fixed of ['"causelens-detective"', '"causelens-scientist"', '"causelens-experiment-designer"']) {
+    assert.ok(!built.includes(`slotKey: ${fixed}`), `no fixed slot key ${fixed}`)
+  }
 })
 
 test('the static console is labelled and shown from the bundle through a sandboxed srcDoc iframe', () => {
