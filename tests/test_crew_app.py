@@ -382,3 +382,14 @@ def test_with_missing_days_the_tools_list_them_instead_of_filling_them(tmp_path)
     assert series["missing_dates"] == gone and len(series["points"]) == 90
     assert {str(d) for d in confirm["exclusions"]["missing_dates"]} == set(gone)
     assert point["status"] in {"ok", "insufficient_data"}
+
+
+def test_the_prompts_carry_the_number_effect_and_noise_rules():
+    for slug in packaging.ROLES:
+        text = " ".join((APP / "prompts" / f"{slug}.md").read_text().split())
+        assert "Numbers are quoted exactly" in text and "Do not round, shorten, convert to percent or add thousands separators" in text
+        assert "not the difference-in-differences effect" in text and "Name which one every effect number is" in text
+        assert '"not distinguishable from noise"' in text and "Never write that there was \"no change\"" in text
+    designer = " ".join((APP / "prompts" / "experiment-designer.md").read_text().split())
+    assert "Open your answer with the tool's `hypothesis`, quoted verbatim" in designer and "caused or hurt" in designer
+    assert "settle which release hurt conversion" not in designer
