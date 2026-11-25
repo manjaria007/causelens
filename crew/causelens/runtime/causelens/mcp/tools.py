@@ -21,7 +21,7 @@ from typing import Literal, ParamSpec, TypeVar
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
-from pydantic import RootModel
+from pydantic import BaseModel, ConfigDict, RootModel
 
 from causelens.analytics import (
     CandidateMatchResult,
@@ -97,6 +97,25 @@ DecompositionIn = strictly(DecompositionResult)
 CandidateTestingIn = strictly(CandidateTestingResult)
 DidIn = strictly(DidResult)
 PatternIn = strictly(ExpectedPattern)
+
+class CandidateTestSettings(BaseModel):
+    """The candidate-test settings ``design_experiment`` uses in its small-input mode (the same meaning and defaults as ``test_candidates``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    focal: SegmentSpec | None = None
+    candidates: list[str] | None = None
+    expected_patterns: dict[str, PatternIn] | None = None
+    lag_days: dict[str, StrictInt] | None = None
+    sensitivity_lags: tuple[StrictInt, ...] = (0, 1)
+    alpha: AlphaLevel = 0.05
+    level: AlphaLevel = 0.95
+    lead_days: StrictInt = 3
+    did_cov: Literal["cluster", "hc1"] = "hc1"
+
+
+CandidateSettingsIn = strictly(CandidateTestSettings)
+
 
 class DecomposeChangeOutput(RootModel[DecompositionResult | DecompositionSummary]):
     """decompose_change's output: the full ``DecompositionResult`` (``detail="full"``, the default, unchanged on the wire) or the
@@ -532,8 +551,10 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     @_guarded
     def design_experiment(
         dataset_id: DatasetId,
-        candidate_testing: CandidateTestingIn,
         post_window: PostWindow,
+        candidate_testing: CandidateTestingIn | None = None,
+        pre_window: PreWindow | None = None,
+        candidate_settings: CandidateSettingsIn | None = None,
         quality: QualityIn | None = None,
         apply_exclusions: StrictBool = True,
         target_candidate: str | None = None,
@@ -545,15 +566,41 @@ def register_tools(server: MCPServer, registry: DatasetRegistry) -> None:
     ) -> ExperimentDesign:
         """A randomized rollback experiment sized from the observed focal traffic. A planning aid, not a causal claim.
 
-        The population is the focal segment in ``candidate_testing``; the baseline and daily traffic come from
-        ``dataset_id`` over ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing. The
-        candidate-testing result must reproduce on this dataset (its exclusions, stored DiD and impact, and timing
-        analysis are recomputed and compared), so pass the ``dataset_id``, ``quality`` and ``apply_exclusions`` that
-        produced it; otherwise the call is refused and names the fields that differ.
+        Two ways to call it, never both:
+
+        * **Prior result:** pass ``candidate_testing``, the complete result of ``test_candidates``. It must reproduce on this dataset (its
+          exclusions, stored DiD and impact, and timing analysis are recomputed and compared), so pass the ``dataset_id``, ``quality`` and
+          ``apply_exclusions`` that produced it; otherwise the call is refused and names the fields that differ. A refused prior is never
+          replaced by a recomputation.
+        * **Small input:** omit ``candidate_testing`` and pass ``pre_window`` (and optionally ``candidate_settings``, the same settings
+          ``test_candidates`` takes). The candidate test is then run here on ``dataset_id`` over ``pre_window`` and ``post_window``, exactly as
+          ``test_candidates`` would run it, and the design is built from that result.
+
+        The population is the focal segment of the candidate test; the baseline and daily traffic come from ``dataset_id`` over
+        ``post_window``. Missing inputs give ``status = "needs_input"`` and name what is missing.
         """
+        if candidate_testing is not None and (pre_window is not None or candidate_settings is not None):
+            raise ToolError(
+                "Ambiguous request: pass either candidate_testing (a prior test_candidates result) or pre_window with optional "
+                "candidate_settings (the candidate test is then run here), not both."
+            )
+        if candidate_testing is None and pre_window is None:
+            raise ToolError("design_experiment needs either candidate_testing (a prior test_candidates result) or pre_window to run the candidate test.")
         data = registry.load(dataset_id)
         require_quality(quality, data)
-        require_candidate_result(candidate_testing, data, quality, apply_exclusions)
+        if candidate_testing is not None:
+            require_candidate_result(candidate_testing, data, quality, apply_exclusions)
+        else:
+            if data.events is None:
+                raise ToolError(f"Dataset '{dataset_id}' has no event log, so there are no candidates to test.")
+            assert pre_window is not None
+            settings = candidate_settings or CandidateTestSettings()
+            candidate_testing = _test_candidates(
+                data.metrics, data.events, pre_window.as_tuple(), post_window.as_tuple(), focal=settings.focal, decomposition=None,
+                candidates=settings.candidates, expected_patterns=settings.expected_patterns, lag_days=settings.lag_days,
+                sensitivity_lags=settings.sensitivity_lags, alpha=settings.alpha, level=settings.level, quality=quality,
+                apply_exclusions=apply_exclusions, lead_days=settings.lead_days, did_cov=settings.did_cov,
+            )
         return _design_experiment(
             data.metrics, candidate_testing, post_window.as_tuple(), events=data.events, quality=quality,
             apply_exclusions=apply_exclusions, target_candidate=target_candidate, arms=arms, mde_pp=mde_pp, alpha=alpha,

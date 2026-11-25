@@ -214,3 +214,80 @@ def test_summary_settings_echo_the_arguments(files):
     assert not err
     assert s["settings"]["dimensions"] == ["device", "browser"] and s["settings"]["explain_threshold"] == 0.9
     assert s["localization"] == full["localization"] and s["partitions"] == [p["name"] for p in full["partitions"]]
+
+
+# --------------------------------------------------------------------------- design_experiment small-input mode
+
+def test_small_input_mode_equals_the_intact_prior_path(files):
+    (tc, _, e0), = calls(files, ("test_candidates", {"dataset_id": "reference", **WINDOWS}))
+    assert not e0
+    (prior, t1, e1), (small, t2, e2) = calls(
+        files, ("design_experiment", {"dataset_id": "reference", "candidate_testing": tc, "post_window": WINDOWS["post_window"]}),
+        ("design_experiment", {"dataset_id": "reference", **WINDOWS}),
+    )
+    assert not e1 and not e2, (t1, t2)
+    assert small == prior and small["status"] == "ok" and small["plan"]["power"]["n_control"] > 0
+
+
+@pytest.mark.parametrize("settings,extra", [
+    ({"lag_days": {"Homepage hero refresh": 1}}, {"arms": "each_candidate"}),
+    ({"candidates": ["Checkout v4.2"], "level": 0.9, "did_cov": "cluster"}, {"mde_pp": 0.4}),
+    ({"expected_patterns": {"Checkout v4.2": {"kind": "uniform", "scale": "relative"}}}, {}),
+])
+def test_small_input_settings_mean_what_test_candidates_means(files, settings, extra):
+    (tc, _, e0), = calls(files, ("test_candidates", {"dataset_id": "reference", **WINDOWS, **settings}))
+    assert not e0
+    (prior, t1, e1), (small, t2, e2) = calls(
+        files, ("design_experiment", {"dataset_id": "reference", "candidate_testing": tc, "post_window": WINDOWS["post_window"], **extra}),
+        ("design_experiment", {"dataset_id": "reference", **WINDOWS, "candidate_settings": settings, **extra}),
+    )
+    assert not e1 and not e2, (t1, t2)
+    assert small == prior
+
+
+def test_both_modes_at_once_is_refused(files):
+    (tc, _, _), = calls(files, ("test_candidates", {"dataset_id": "reference", **WINDOWS}))
+    for extra in ({"pre_window": WINDOWS["pre_window"]}, {"candidate_settings": {}}, {"pre_window": WINDOWS["pre_window"], "candidate_settings": {"level": 0.9}}):
+        (_, text, err), = calls(files, ("design_experiment", {"dataset_id": "reference", "candidate_testing": tc, "post_window": WINDOWS["post_window"], **extra}))
+        assert err and "Ambiguous request" in text, text
+
+
+def test_neither_mode_is_refused(files):
+    (_, text, err), = calls(files, ("design_experiment", {"dataset_id": "reference", "post_window": WINDOWS["post_window"]}))
+    assert err and "needs either candidate_testing" in text
+    (_, text, err), = calls(files, ("design_experiment", {"dataset_id": "reference", "post_window": WINDOWS["post_window"], "candidate_settings": {}}))
+    assert err and "needs either candidate_testing" in text
+
+
+def test_an_invalid_prior_is_refused_and_never_replaced_by_a_recomputation(files):
+    """The native Designer's copy lost two empty lists: still refused (no restoration here), and no design is returned in its place."""
+    slot = json.loads((ROOT / "docs" / "crew-evidence" / "runs-0.1.2" / "experiment-designer-run2.json").read_text())
+    sent = [json.loads(m["meta"]["input"]) for m in slot["messages"] if m.get("role") == "tool" and '"candidate_testing"' in (m["meta"].get("input") or "")]
+    assert sent and all("MCP tool error" in m["meta"]["output"] for m in slot["messages"] if m.get("role") == "tool" and '"candidate_testing"' in (m["meta"].get("input") or ""))
+    arguments = {k: v for k, v in sent[0].items() if k != "_meta"}
+    (out, text, err), = calls(files, ("design_experiment", arguments))
+    assert err and out is None and "missing_dates" in text
+    (tc, _, _), = calls(files, ("test_candidates", {"dataset_id": "reference", **WINDOWS}))
+    tampered = copy.deepcopy(tc)  # a stored estimate edited: the existing provenance guard recomputes it and refuses the copy
+    supported = next(c for c in tampered["candidates"] if c["differential_effect"])
+    supported["differential_effect"]["effect_pp"]["estimate"] -= 0.1
+    (out, text, err), = calls(files, ("design_experiment", {"dataset_id": "reference", "candidate_testing": tampered, "post_window": WINDOWS["post_window"]}))
+    assert err and out is None and "differential_effect" in text, text
+
+
+def test_small_input_settings_are_strict(files):
+    for settings, fragment in (({"level": "0.9"}, "level"), ({"lag_days": {"Checkout v4.2": True}}, "lag_days"), ({"nonsense": 1}, "nonsense"),
+                               ({"sensitivity_lags": [0, 1.0]}, "sensitivity_lags")):
+        (_, text, err), = calls(files, ("design_experiment", {"dataset_id": "reference", **WINDOWS, "candidate_settings": settings}))
+        assert err and fragment in text, (settings, text)
+
+
+def test_small_input_mode_on_data_with_no_event_log_is_refused(files):
+    server = create_server(DatasetRegistry([DatasetConfig("reference", files[0], None)]))
+
+    async def go():
+        async with Client(server) as client:
+            return await client.call_tool("design_experiment", {"dataset_id": "reference", **WINDOWS})
+
+    r = asyncio.run(go())
+    assert r.is_error and "no event log" in " ".join(getattr(b, "text", "") for b in r.content)

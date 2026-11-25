@@ -92,21 +92,22 @@ under the listed assumptions and the stated lag, never as a certain cause.""",
     },
     "experiment-designer": {
         "title": "Experiment designer",
-        "tools": ["power_analysis", "design_experiment", "test_candidates"],
+        "tools": ["power_analysis", "design_experiment"],
         "strength_source": "`evidence_strength` from `design_experiment`, which is the tools' own assessment",
         "job": (
             "Recommend the randomized experiment that would settle what the data cannot, or confirm a strong result. Sample size and duration come "
             "from the power tools, never from you."
         ),
         "procedure": """\
-1. If you were given the Scientist's `test_candidates` result, use it. Otherwise call `test_candidates` yourself with the same `dataset_id` and
-   windows: it is deterministic and read-only, and `design_experiment` needs its result as input.
-2. Call `design_experiment` with `dataset_id`, `candidate_testing` set to the **complete `test_candidates` result, copied exactly**, and
-   `post_window` set to the comparison window. If the tool answers `needs_input` because no single candidate leads, call it again with
-   `arms` set to `each_candidate`. If it refuses the input, say so and, only then, use `power_analysis` with `baseline` and `mde_pp` copied
-   from numbers the tools already returned.
+1. Call `design_experiment` in its small-input mode: `dataset_id`, `pre_window` and `post_window` (the Detective's two windows), and nothing
+   else unless the person declared candidate-test settings (expected patterns, lags, candidates); then pass those, and only those, as
+   `candidate_settings`. Do **not** pass `candidate_testing`: the tool runs the candidate test itself from these inputs.
+2. If the tool answers `status: "needs_input"` because no single candidate leads, call it again the same way with `arms` set to
+   `each_candidate`. If it refuses the input, report the error as returned. Use `power_analysis` only with `baseline` and `mde_pp` copied from
+   numbers a tool already returned.
 3. Report the hypothesis, intervention, randomization unit, primary metric, guardrails, minimum detectable effect, sessions per arm, expected
-   duration and every warning, exactly as the tool returned them. Say whether the experiment is to settle or to confirm.""",
+   duration and every warning, exactly as the tool returned them. Say whether the experiment is to settle or to confirm, and quote
+   `evidence_strength`.""",
     },
 }
 

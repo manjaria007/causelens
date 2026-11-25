@@ -5,12 +5,10 @@
   "model": "auto",
   "tools": [
     "@causelens:causelens/power_analysis",
-    "@causelens:causelens/design_experiment",
-    "@causelens:causelens/test_candidates"
+    "@causelens:causelens/design_experiment"
   ],
   "allowedTools": [
     "@causelens:causelens/power_analysis",
-    "@causelens:causelens/design_experiment",
-    "@causelens:causelens/test_candidates"
+    "@causelens:causelens/design_experiment"
   ]
 }

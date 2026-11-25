@@ -119,7 +119,7 @@ def test_no_committed_file_needs_a_sandbox_or_personal_path():
 
 
 def test_each_agent_has_its_role_tools_and_an_app_contained_prompt():
-    expected = {"detective": DETECTIVE.tools, "scientist": SCIENTIST.tools, "experiment-designer": EXPERIMENT_DESIGNER.tools | {"test_candidates"}}
+    expected = {"detective": DETECTIVE.tools, "scientist": SCIENTIST.tools, "experiment-designer": EXPERIMENT_DESIGNER.tools}
     assert set(expected) == {Path(a).stem for a in MANIFEST["agents"]}
     for slug, tools in expected.items():
         spec = agent(slug)
@@ -131,10 +131,10 @@ def test_each_agent_has_its_role_tools_and_an_app_contained_prompt():
         assert spec["name"] == f"causelens-{slug}"
 
 
-def test_the_role_tool_sets_follow_the_python_roles_except_for_the_documented_designer_addition():
+def test_the_role_tool_sets_follow_the_python_roles():
     assert {t.split("/")[1] for t in agent("detective")["tools"]} == set(DETECTIVE.tools)  # refs are "@causelens:causelens/<tool>"
     assert {t.split("/")[1] for t in agent("scientist")["tools"]} == set(SCIENTIST.tools)
-    assert {t.split("/")[1] for t in agent("experiment-designer")["tools"]} == set(EXPERIMENT_DESIGNER.tools) | {"test_candidates"}
+    assert {t.split("/")[1] for t in agent("experiment-designer")["tools"]} == set(EXPERIMENT_DESIGNER.tools)  # small-input design_experiment
     assert set(TOOL_NAMES) == set(DETECTIVE.tools) | set(SCIENTIST.tools) | set(EXPERIMENT_DESIGNER.tools)  # all 15 are used by some agent
 
 

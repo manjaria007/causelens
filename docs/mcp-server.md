@@ -130,7 +130,7 @@ unknown arguments (`additionalProperties: false`), so a misspelt option is an er
 | `detect_change_point` | `detect_change_point` | `quality` | `ChangePointResult` |
 | `daily_series` | `daily_series` | `quality` | `DailySeriesResult` |
 | `match_event_candidates` | `match_event_candidates` | `change_point` | `CandidateMatchResult` |
-| `decompose_change` | `decompose_change` | `quality` | `DecompositionResult` |
+| `decompose_change` | `decompose_change` | `quality` | `DecompositionResult` (default `detail="full"`) or `DecompositionSummary` (`detail="summary"`) |
 | `test_candidates` | `test_candidates` | `decomposition`, `quality` | `CandidateTestingResult` |
 | `test_event_scope` | `test_event_scope` | `decomposition`, `quality` | `CandidateVerdict` |
 | `estimate_did` | `estimate_did` | `quality` | `DidResult` |
@@ -138,12 +138,24 @@ unknown arguments (`additionalProperties: false`), so a misspelt option is an er
 | `run_placebo` | `run_placebo` | `quality` | `PlaceboResult` |
 | `project_impact` | `project_impact` | `did`, `quality` | `ImpactResult` |
 | `power_analysis` | `power_analysis` | | `PowerResult` |
-| `design_experiment` | `design_experiment` | `candidate_testing`, `quality` | `ExperimentDesign` |
+| `design_experiment` | `design_experiment` | `candidate_testing` (or none: small-input mode), `quality` | `ExperimentDesign` |
 
 The table has the eleven tools from the design, plus `daily_series` (Task 10: the daily values the console draws; a description, not a
 test), `test_candidates` and `match_event_candidates` (the Task 3 and
 Task 5 entry points an investigation needs between them) and `list_datasets`. Library helpers that are not tools in the
 design (`normal_approx_power`, `two_proportion_test`, `benjamini_hochberg`, the loaders and validators) are not exposed.
+
+### Changes from the native Crew run (PR #13)
+
+* `decompose_change(detail="summary")` returns a `DecompositionSummary` of about 11,000 characters (the full result is 150-250 kB, past the
+  30,000-character tool-output limit of the kiro-cli client). Every value in it is copied from the full result; it is not accepted as a
+  `decomposition` input. `"full"` stays the default and is unchanged on the wire. The published output schema is an object offering both.
+* `match_event_candidates` restores exactly three empty containers of the copied change point when their keys are absent (`segment`,
+  `exclusions.missing_dates`, `exclusions.truncated_baseline_dates`), which a native agent's tool call was observed to drop. Nothing else is
+  restored; nulls and wrong types are refused. The change point is not recomputed, so an edited copy is used as given.
+* `design_experiment` has a small-input mode: omit `candidate_testing`, pass `pre_window` (and optional `candidate_settings`, the same settings as
+  `test_candidates`), and the candidate test runs inside the call. Supplying both modes is refused; a refused prior is never replaced by a
+  recomputation.
 
 ### Conventions
 
