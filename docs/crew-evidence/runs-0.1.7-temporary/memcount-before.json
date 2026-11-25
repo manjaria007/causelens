@@ -1,0 +1,15 @@
+{
+ "episodic_memories": 13,
+ "semantic_memory": 4,
+ "memory_events": 18,
+ "max_event_id": 18,
+ "causelens_episodes_by_conversation": {
+  "dashboard:causelens-detective": 3,
+  "dashboard:causelens-detective-missingdays": 1,
+  "dashboard:causelens-detective-nochange": 1,
+  "dashboard:causelens-detective-run2": 3,
+  "dashboard:causelens-experiment-designer-run2": 2,
+  "dashboard:causelens-experiment-designer-run3": 1,
+  "dashboard:causelens-scientist-run2": 2
+ }
+}

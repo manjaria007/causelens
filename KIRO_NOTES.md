@@ -1253,3 +1253,44 @@ not perform are listed under "Not done" in the final block.
   The missing-day case was not re-run on 0.1.4 to 0.1.6 (prompt-only changes; its 0.1.2 run stands).
 - **Checks after the final code change (0.1.6):** full suite once, 1,402 passed (250 s); Ruff passed; `package_crew_app.py --check` up to date.
   Still open: 5.1's session-menu export and 5.2's Kiro MCP-panel screenshot (owner actions in the UI), then 5.4.
+
+### Temporary Crew sessions, early-stop strength, per-candidate share sets (app 0.1.7)
+
+- **Setting.** Every new CauseLens chat is a Crew **temporary** session. In Crew 0.13.1 a temporary slot blocks memory reads
+  (`blocks_reads`: no memory-context injection) and memory writes (`is_restricted`: no consolidation or lessons), and Crew prefixes each
+  message with its "[TEMPORARY SESSION] ... no memory reads or writes" note. `memory.db`, the existing sessions and other apps' settings were
+  not touched; Crew's global memory settings are unchanged.
+  - **Embedded chat.** `ChatEmbed` has no memory-mode prop and creates a missing slot as persistent, so the page first creates a fresh slot
+    with `POST /api/chat/slots` `{name, agent, memory_mode: "temporary"}` (name `causelens-<agent>-<ms>-<8 hex>`, never a fixed key),
+    checks that Crew returned that key, that agent and `memory_mode: "temporary"`, and only then mounts `ChatEmbed` on it; otherwise it shows
+    the reason and mounts nothing. "New temporary session" makes another. `permissions.api` is unchanged: Crew matches `/api/chat` against
+    `/api/chat/slots` at a path boundary (`_api_pattern_matches`).
+  - **Full-chat launch.** `openChat({agent, message, autoSend: false, memoryMode: "temporary"})`, with no `slotKey`, so Crew opens a new draft
+    session in that mode.
+  - **Observed on the real dashboard** (headless Chrome, page loaded, each tab clicked, nothing sent): three `POST /api/chat/slots` with
+    `"memory_mode":"temporary"` (the host added `"embed_app":"causelens"`); the slot list then reports all three as `temporary`, 0 messages;
+    screenshots `07-temporary-*.png`. These three empty slots remain in the dashboard.
+- **Early-stop strength.** `confirm_change` now returns `causal_attribution` (`strength` always `insufficient`, `checks_run` empty, a fixed
+  `reason` per verdict, enforced by a validator), like the decomposition summary's. The not-distinguishable reason says "this does not show
+  that no change occurred". The Detective quotes it when it stops at step 5. Tests: `tests/test_confirm_change.py` (fixed reason per verdict;
+  a mismatched attribution is refused) and the confirm property test in `tests/test_change_properties.py`.
+- **Share confidence sets.** No code change: every `test_candidates` candidate already carries `timing.share_set` (`available`, `reason`,
+  `kind`, `pieces`, `level`) or `timing: null` with `timing_status`. The Scientist prompt now reports it for every candidate, rejected ones
+  included, quoting `reason` or `timing_status` when it is unavailable.
+- **Runs, once each, in fresh temporary sessions** (created by `POST /api/chat/slots` before the first message; create response and slot list
+  both `temporary`; session files record `"memory_mode": "temporary"`; saved in `docs/crew-evidence/runs-0.1.7-temporary/` with the check
+  under `_temporary_check`):
+  - Detective, reference: 27 numbers, all whole-token matches. Segment change and whole-site change kept apart; `decompose_change`
+    `causal_attribution` `insufficient` quoted.
+  - Scientist, reference: 49 numbers, all matched. Share sets for both candidates: Checkout v4.2 `0.31036226248816656` to
+    `1.4317526652958414`, Homepage hero refresh `-0.43175266529584155` to `0.6896377375118334` (bounded, 0.95). DiD effect labelled as
+    separate from the segment change; `moderate`, with the tool's cap reason.
+  - Designer, reference: 34 numbers, all matched; opens with the tool's hypothesis verbatim.
+  - Detective, no-change data (installed data swapped to `0ea0e805...`, restored to `7c8fe719...`, hash-checked): 26 numbers, all matched;
+    verdict `not_distinguishable_from_noise`; stopped; strength `insufficient` with `confirm_change`'s new reason quoted word for word.
+  - None of the four mentions an earlier session.
+- **Memory store.** Read-only counts of `memory.db` before and after the four runs are identical (13 episodic, 4 semantic, 18 events).
+  Crew consolidates after idle time (`history_idle_hours` 3.0), so equal counts right after the runs are expected either way. The block on
+  writes is Crew's documented `is_restricted` behaviour; I did not observe it directly. The "[TEMPORARY SESSION]" prefix is not stored in
+  the transcript, so it was not observed either.
+- **Checks after the final code change (0.1.7):** full suite once, 1,404 passed (244 s); Ruff passed; `package_crew_app.py --check` up to date.

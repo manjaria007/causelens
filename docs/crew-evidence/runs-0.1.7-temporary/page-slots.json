@@ -1,0 +1,20 @@
+[
+ {
+  "key": "causelens-detective-1795626787306-bf336e90",
+  "agent": "causelens-detective",
+  "memory_mode": "temporary",
+  "messages": 0
+ },
+ {
+  "key": "causelens-scientist-1795626799065-8786e792",
+  "agent": "causelens-scientist",
+  "memory_mode": "temporary",
+  "messages": 0
+ },
+ {
+  "key": "causelens-experiment-designer-1795626803161-021bb13d",
+  "agent": "causelens-experiment-designer",
+  "memory_mode": "temporary",
+  "messages": 0
+ }
+]

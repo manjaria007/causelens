@@ -1,0 +1,136 @@
+{
+ "requests": [
+  {
+   "method": "GET",
+   "path": "/api/chat/slots",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/chat-1-1795478746",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/folders",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/tags",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/tag-columns",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/chat-1-1795478746/environment",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/chat-1-1795478746/selection-capabilities",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/pins",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/unrestored",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/chat-1-1795478746/selection-capabilities",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots",
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/slots",
+   "body": "{\"name\":\"causelens-detective-1795626787306-bf336e90\",\"agent\":\"causelens-detective\",\"memory_mode\":\"temporary\",\"embed_app\":\"causelens\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-detective-1795626787306-bf336e90",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-detective-1795626787306-bf336e90/question",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-detective-1795626787306-bf336e90",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-detective-1795626787306-bf336e90/question",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-detective-1795626787306-bf336e90",
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/slots",
+   "body": "{\"name\":\"causelens-scientist-1795626799065-8786e792\",\"agent\":\"causelens-scientist\",\"memory_mode\":\"temporary\",\"embed_app\":\"causelens\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-scientist-1795626799065-8786e792",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-scientist-1795626799065-8786e792/question",
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/slots",
+   "body": "{\"name\":\"causelens-experiment-designer-1795626803161-021bb13d\",\"agent\":\"causelens-experiment-designer\",\"memory_mode\":\"temporary\",\"embed_app\":\"causelens\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-experiment-designer-1795626803161-021bb13d",
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/slots/causelens-experiment-designer-1795626803161-021bb13d/question",
+   "body": null
+  }
+ ],
+ "tabResults": [
+  {
+   "label": "Detective",
+   "slotKey": "causelens-detective-1795626787306-bf336e90",
+   "creating": false
+  },
+  {
+   "label": "Scientist",
+   "slotKey": "causelens-scientist-1795626799065-8786e792",
+   "creating": false
+  },
+  {
+   "label": "Experiment designer",
+   "slotKey": "causelens-experiment-designer-1795626803161-021bb13d",
+   "creating": false
+  }
+ ]
+}
