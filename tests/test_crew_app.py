@@ -390,6 +390,8 @@ def test_the_prompts_carry_the_number_effect_and_noise_rules():
         assert "Numbers are quoted exactly" in text and "Do not round, shorten, convert to percent or add thousands separators" in text
         assert "not the difference-in-differences effect" in text and "Name which one every effect number is" in text
         assert '"not distinguishable from noise"' in text and "Never write that there was \"no change\"" in text
+        assert "Copy every digit" in text and "(`242199`, not `242,199`)" in text
+        assert "nor a paraphrase such as" in text
     designer = " ".join((APP / "prompts" / "experiment-designer.md").read_text().split())
     assert "Open your answer with the tool's `hypothesis`, quoted verbatim" in designer and "caused or hurt" in designer
     assert "settle which release hurt conversion" not in designer

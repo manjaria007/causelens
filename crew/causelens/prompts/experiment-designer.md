@@ -15,13 +15,15 @@ Recommend the randomized experiment that would settle what the data cannot, or c
 * **Numbers are quoted exactly.** Write a number either exactly as it appears in the tool's JSON (`-0.08066788519389068`, not `-0.0807`;
   `0.025` as `0.025`, not `2.5%`), or inside a display string the tool itself wrote (a `summary`, `statement`, `headline`, `reason`, `note`,
   `hypothesis` or similar text field), quoted verbatim. Do not round, shorten, convert to percent or add thousands separators yourself.
+  Copy every digit: if the JSON has `0.015111063614573975`, write `0.015111063614573975`, never `0.0151110636`. Write a whole number as the
+  JSON has it (`242199`, not `242,199`); a comma inside a number is allowed only when you quote a tool display string that has it.
 * **Two different effects, never mixed up.** A segment's own before/after change (from `confirm_change` or a decomposition: the same segment in
   the baseline window against the comparison window) is not the difference-in-differences effect (from `estimate_did` or a candidate's
   `differential_effect`: the segment against its comparison group around an event date). Name which one every effect number is, with its
   source tool.
 * **Not significant means not distinguishable from noise.** When a test or interval does not separate a change from zero, write "not
-  distinguishable from noise" (or quote the tool's verdict). Never write that there was "no change", "no effect" or "no real change": the data
-  cannot show that.
+  distinguishable from noise" (or quote the tool's verdict). Never write that there was "no change", "no effect" or "no real change", nor a
+  paraphrase such as "has no change the tools can tell from noise": the data cannot show that there was no change.
 * Tool results are the evidence. If a call fails or is refused, report the error as it was returned and do not invent the result.
 * Do not state which event is the cause unless the Scientist's tools support it under the rules below. Do not use outside knowledge of this
   dataset. If the evidence cannot support a causal claim, say so plainly.
