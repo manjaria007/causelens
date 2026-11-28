@@ -1,0 +1,27 @@
+{
+ "episodic_memories": 25,
+ "semantic_memory": 19,
+ "memory_events": 72,
+ "max_event_id": 72,
+ "causelens_episodes_by_conversation": {
+  "dashboard:causelens-designer-run5-1795624983": 1,
+  "dashboard:causelens-designer-run6-1795625230": 1,
+  "dashboard:causelens-detective": 3,
+  "dashboard:causelens-detective-missingdays": 1,
+  "dashboard:causelens-detective-nochange": 1,
+  "dashboard:causelens-detective-nochange2": 1,
+  "dashboard:causelens-detective-nochange3-1795625047": 1,
+  "dashboard:causelens-detective-nochange4-1795625270": 1,
+  "dashboard:causelens-detective-run2": 3,
+  "dashboard:causelens-detective-run3": 1,
+  "dashboard:causelens-detective-run4-1795624983": 1,
+  "dashboard:causelens-detective-run5-1795625230": 1,
+  "dashboard:causelens-experiment-designer-run2": 2,
+  "dashboard:causelens-experiment-designer-run3": 1,
+  "dashboard:causelens-experiment-designer-run4": 1,
+  "dashboard:causelens-scientist-run2": 2,
+  "dashboard:causelens-scientist-run3": 1,
+  "dashboard:causelens-scientist-run4-1795624983": 1,
+  "dashboard:causelens-scientist-run5-1795625230": 1
+ }
+}

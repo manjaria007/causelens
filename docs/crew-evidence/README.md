@@ -29,3 +29,7 @@ From app 0.1.7 every new CauseLens chat is temporary: Crew reads no stored memor
 | `08-crew-mcp-causelens-15-tools.png`, `mcp-probe/` | Crew's MCP Servers page after "Probe MCP servers": `causelens:causelens` Online, 15 tools including `daily_series`. Crew evidence, not a Kiro CLI panel; the home path is shown as `~` |
 | `09-page-temporary-send.png`, `page-send-0.1.8/` | One message sent through the page's embed in a fresh temporary Detective chat (app 0.1.8): request carries `memory_mode: "temporary"`, slot stays temporary, answer completes |
 | `10-session-menu-export.png`, `export-0.1.6-historical/` | **Historical, persistent, memory-enabled** 0.1.6 Detective session exported through the session menu (JSON and Markdown), with its Crew activity record. Crew does not export temporary sessions |
+
+| File | What |
+|---|---|
+| `standalone-install-0.1.8/` | **New standalone install**, separate from the evidence above: CauseLens installed through Discover from `manjaria007/causelens-crew-app` `main` (`a165a0c`), dev mode off; Sources change, app-only trust prompt and install log, MCP probe with 15 tools, and one Detective run in a fresh Temporary session from the app page (tool calls and answer) |

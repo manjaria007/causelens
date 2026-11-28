@@ -1348,3 +1348,79 @@ The main registry now points at the separate repository with no `subdirectory`; 
 Verification: Crew's manifest and three agent definitions validate; all tool references resolve; all 23 packaged runtime hashes match; no external symlinks, personal runtime paths, credentials or answer-key files are present. A standalone MCP subprocess lists 15 tools, returns reference dataset 5888 rows, excludes only 2026-09-20, links the desktop flag to Analytics tag deploy, confirms a change and localizes it to mobile Safari, returns 8158 per arm for the standard power check, and refuses boolean MDE. This is a terminal protocol check, not a native Crew agent run. The first probe assertion expected structured segment labels where the summary returns display strings; the probe was corrected, with no app change.
 
 Pending: switching the actual Mac Crew installation to the new source and asking the Detective once in a fresh Temporary session. Codex has no connection to the Mac dashboard and did not uninstall the app, alter memory.db, change trust settings or invent new native evidence. `docs/crew-standalone-install.md` gives the Kiro instructions. The app remains version 0.1.8; no analytics, MCP, simulator, reference data, steering, generated UI or inference rules changed, so no full-suite or calibration rerun was needed.
+
+### Standalone Crew install from Discover (`manjaria007/causelens-crew-app`, app 0.1.8), 2026-11-28
+
+This is a **new standalone install**, separate from the earlier native evidence (which came from the `causelens` repository's
+`crew-app` branch and stays as it was). Followed `docs/crew-standalone-install.md` (branch `codex/crew-standalone-publish`, `0d9f2f5`).
+Crew 0.13.1, kiro-cli 3.5.0.
+
+- **1. Published repository.** `https://github.com/manjaria007/causelens-crew-app` `main` = `a165a0c`. `app.json`, `LICENSE`, `runtime/`,
+  `data/`, `ui/dist/index.mjs` are at the expected paths; `app-registry.json` has `name` `causelens`, `gitUrl` the new repo, `branch`
+  `main`, no `subdirectory`. `SOURCE.json`: source `causelens` `9390f39`, `crew/causelens`, app tree `98417fd...`, app version 0.1.8. A
+  recursive diff of the published copy against `9390f39:crew/causelens` differs only in the files SOURCE.json names (README adapted;
+  LICENSE, app-registry.json, SOURCE.json, .gitignore added). The source tree hash is `98417fd...`, as stated.
+- **Before switching.** The old install: `registry:causelens` from registry `causelens-dev` (`manjaria007/causelens`, branch `crew-app`,
+  commit `3ca90b4`), 0.1.8, enabled, **dev mode on**. Against `3ca90b4:crew/causelens` it had no local edits (only Crew's
+  `.kirocrew-deps`, `installed.json`, `__pycache__`). Backed up (app tree, `app info`, `config.json`) to
+  `~/onenumber/backups/causelens-app-20261127-201340/`. No historical persistent session was exported this time (the 0.1.6 export
+  already exists in `export-0.1.6-historical/`).
+- **2. Dev off, uninstall.** `kirocrew app dev causelens --off` ("dev mode off"; `dev: false`), then `kirocrew app uninstall causelens`
+  without `--purge-data` ("uninstalled causelens"). Afterwards: the 54 CauseLens transcript files in `~/.kiro/crew/sessions/` are
+  byte-identical (SHA-256 checked); `memory.db` counts unchanged (25 episodic, 19 semantic, 72 events, up from 13/4/18 on 2026-11-25 through
+  Crew's normal consolidation); `~/.kiro/crew/apps/causelens/data/` kept; the rendered agents and the app's trust entries removed. Old
+  sessions may no longer be resumable.
+- **3. Sources.** The old `causelens-dev` registry was pinned (it came from `config.json` `registries`, set during the first install), and
+  Crew's Sources popover shows no remove control for a pinned registry. I removed it with
+  `kirocrew config set registries` = `[]` (it was the only configured registry; the built-in and Kiro Crew registries are separate), then in
+  **Apps → Discover → Manage app sources → Add Registry** entered name `causelens`, repository
+  `https://github.com/manjaria007/causelens-crew-app`, branch `main` (`PUT /api/apps/registries` with that one entry), and clicked Sync Apps
+  (`POST /api/apps/registries/refresh`, 200). Discover then listed exactly one `causelens` entry: that repository, `main`, 0.1.8, no
+  `subdirectory`. The popover's "You are now trusting apps from github.com" note granted nothing: `/api/security/trusted-registries` reports the
+  registry `granted: false`, `trusted: false`.
+- **4. Install from Discover.** Clicked Install on the CauseLens card. Trust prompt: "Trust “CauseLens” to run its own code? This applies to
+  “CauseLens” only. Every other third-party app stays blocked." It lists running its own code, a background program and shipped commands,
+  `/api/chat`, published at the new repository. Clicked "Trust this app" (2026-11-28T01:20:06Z). Install log: cloned
+  `causelens-crew-app` (branch `main`), pip requirements already satisfied, "build succeeded", "installed causelens v0.1.8". It installed
+  disabled; clicked Enable. Config after: `apps_trusted: ["causelens"]`, `apps_trusted_repositories: {"causelens":
+  "https://github.com/manjaria007/causelens-crew-app"}`, `apps_allow_third_party` unset (unchanged). Dev mode stays off.
+- **5. Installed state.** `kirocrew app info causelens`: version 0.1.8, enabled, `dev: false`, source `registry:causelens`, `sourceUrl`
+  `https://github.com/manjaria007/causelens-crew-app`, `sourceCommit` `a165a0c5ea228ee5da9d60513ccc25c78f466d99` (= remote `main`),
+  installed 2026-11-28T01:20:08Z, grants `/api/chat`. The installed tree equals the published repository apart from Crew's own files. The three
+  rendered agents resolve `@causelens:causelens/...` tools (Detective 7, Scientist 6, Experiment designer 2). Crew's MCP Servers page,
+  "Probe MCP servers" clicked 2026-11-28T01:20:57Z (`POST /api/mcp/probe`): `causelens:causelens` Online, last probed 8:21 PM local, 15
+  tools: list_datasets, check_data_quality, confirm_change, detect_change_point, daily_series, match_event_candidates, decompose_change,
+  test_candidates, test_event_scope, estimate_did, check_pre_trends, run_placebo, project_impact, power_analysis, design_experiment.
+- **6. Detective, fresh Temporary session from the app page** (real dashboard, headless Chrome; message typed in the embed). Slot
+  `causelens-detective-1795828890822-6b14ea3c` created with `"memory_mode":"temporary"`; the send `POST /api/chat?ws=1` carried
+  `"memory_mode":"temporary"`; the slot list reported `temporary` before and after. Message: "Why did checkout conversion fall?" (nothing
+  else). Turn 01:21:39Z to 01:21:58Z. Tool calls, in order, all returned results:
+  1. `list_datasets` `{}`
+  2. `check_data_quality` `{"dataset_id":"reference"}`
+  3. `daily_series` `{"dataset_id":"reference"}`
+  4. `detect_change_point` `{"dataset_id":"reference"}`
+  5. `confirm_change` with pre `2026-08-01..2026-10-13`, post `2026-10-14..2026-10-31`
+  6. `match_event_candidates` with `change_point` = the complete `detect_change_point` result
+  7. `decompose_change` with the same windows and `detail: "summary"`
+  From the current tool output: dataset `reference`, 5888 rows; 2026-09-20 excluded (confirm_change's disclosure "all segments on 1 flagged
+  day(s) are excluded ...: 2026-09-20"; Crew stores tool output cut at 8,000 characters, so `check_data_quality`'s `excluded_dates` is past
+  the stored part; a deterministic replay of the same call gives `["2026-09-20"]`); localization `device × browser`, segment
+  `device=mobile, browser=safari`.
+  **Result** (quoted from the answer): overall conversion 0.03248504520263438 to 0.030643093966824655, change -0.1841951235809724 pp (95% CI
+  -0.2520787409836946 to -0.11428548162583747), 3119066 and 800474 sessions, `real_change`; plausible onset 2026-10-14 to 2026-10-15, best
+  2026-10-15; concentrated in mobile Safari, its own before/after change -0.6576518919737058 pp (95% CI -0.7387859324300694 to
+  -0.576517851517342), 943319 and 242199 sessions, share of change 1.0806678851938907, q 8.923465996194358e-16 over 71 tests (BH), remainder
+  -0.08066788519389068; events coinciding by date: Checkout v4.2 (2026-10-14) and Homepage hero refresh (2026-10-13), "date matches only";
+  evidence strength `insufficient` with the decomposition's `causal_attribution` reason quoted. Replay check: all 24 numbers in the answer
+  match the tool outputs as whole tokens. The Detective gave when and where and no causal verdict.
+  **One wording problem:** "The Scientist should test Checkout v4.2 against mobile Safari, since Apple Pay is tied to Safari." No tool
+  output says that; the event's tool description is only "New payment step with Apple Pay / Google Pay sheet." The clause is the agent's
+  own outside knowledge, which its prompt forbids. Not fixed here.
+  Memory: `memory.db` counts unchanged across the run. Crew wrote no member activity record for the temporary session.
+- **7. Evidence** (`docs/crew-evidence/standalone-install-0.1.8/`, redacted: home path as `~`, device name removed): the temporary
+  session read-back with its tool calls and the create/send request bodies (`detective-temporary-session.json`), the Sources change, the
+  trust prompt and install log, the MCP probe, memory counts, and screenshots 01 to 05 (new source, trust prompt, app detail with the new
+  repository, MCP status with 15 tools, the Detective's answer). The temporary session cannot be exported through the session menu and no
+  persistent session was created for an export.
+- Not done: the Scientist and Experiment designer were not run on this install; no statistical calibration or full test suite was run
+  (runtime unchanged, as the guide says). This verification is recorded, not reviewed.

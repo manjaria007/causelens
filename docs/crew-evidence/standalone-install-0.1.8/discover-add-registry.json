@@ -1,0 +1,78 @@
+{
+ "requests": [
+  {
+   "t": "2026-11-28T01:17:34.552Z",
+   "method": "PUT",
+   "path": "/api/apps/registries",
+   "body": "{\"registries\":[{\"name\":\"causelens\",\"repo\":\"https://github.com/manjaria007/causelens-crew-app\",\"branch\":\"main\"}]}"
+  },
+  {
+   "t": "2026-11-28T01:17:40.566Z",
+   "method": "POST",
+   "path": "/api/apps/registries/refresh",
+   "body": "{}"
+  }
+ ],
+ "responses": [
+  {
+   "status": 200,
+   "path": "/api/apps"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registry"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registries"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registry"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registries"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registries"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registry"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/blob"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registries/refresh"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registries"
+  },
+  {
+   "status": 200,
+   "path": "/api/apps/registry"
+  }
+ ],
+ "popBefore": "External Registries\n\nRegistry-URL install works only for public repos. For a private repo, clone it locally first, then use Install from Path below.\n\nNo external registries\nAdd an org registry to discover team-specific apps\nAdd Registry",
+ "filled": [
+  "causelens",
+  "https://github.com/manjaria007/causelens-crew-app",
+  "main"
+ ],
+ "popAfterAdd": "External Registries\n\nRegistry-URL install works only for public repos. For a private repo, clone it locally first, then use Install from Path below.\n\nYou are now trusting apps from github.com. Apps from this host become installable and run setup with gateway privileges.\ncauselens\nmain\nhttps://github.com/manjaria007/causelens-crew-app\nAdd Registry\nSync Apps",
+ "popAfterSync": "External Registries\n\nRegistry-URL install works only for public repos. For a private repo, clone it locally first, then use Install from Path below.\n\nYou are now trusting apps from github.com. Apps from this host become installable and run setup with gateway privileges.\ncauselens\nmain\nhttps://github.com/manjaria007/causelens-crew-app\nAdd Registry\nSync Apps\nLast synced 8:17:42 PM"
+}
