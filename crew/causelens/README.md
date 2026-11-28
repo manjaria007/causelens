@@ -4,6 +4,8 @@ Three native Crew agents (Detective, Scientist, Experiment designer) that invest
 analytics over MCP. The numerical engine, identification rules and scientist rules are the repository's; this app packages them for Crew.
 It ships a small reference dataset (observed metrics and events only; no answer key).
 
+Published copy for installation: https://github.com/manjaria007/causelens-crew-app.
+
 ## Layout
 
 | Path | What |
@@ -28,7 +30,7 @@ kirocrew app install crew/causelens && kirocrew app enable causelens   # local, 
 kirocrew app dev causelens                                              # development mode
 ```
 
-Or add the repository's root `app-registry.json` as an app registry and install it from Apps → Discover. See the
+Or add the repository's root `app-registry.json` as an app registry and install the standalone published copy from Apps → Discover. See the
 [repository run instructions](https://github.com/manjaria007/causelens#run-it-in-kiro-crew) and
 [native evidence](https://github.com/manjaria007/causelens/tree/main/docs/crew-evidence).
 
