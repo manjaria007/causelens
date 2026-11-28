@@ -40,8 +40,9 @@ The CauseLens Crew app provides the three native roles, a copied-install-safe MC
 
 - Project: https://github.com/manjaria007/causelens
 - Reference demo: https://manjaria007.github.io/causelens/demo/
-- Current app source: https://github.com/manjaria007/causelens/tree/main/crew/causelens
+- Crew app repository: https://github.com/manjaria007/causelens-crew-app
+- Development source and history: https://github.com/manjaria007/causelens/tree/main/crew/causelens
 
-**Owner action:** the entry text asks for an app repository URL, while the prize table uses "separate repo submission". Clarify whether the current app subdirectory qualifies or a dedicated repository under the same account is needed. The current URL alone is not asserted to satisfy every bonus condition; see the [submission checklist](README.md).
+The standalone app repository is under the same GitHub account as the project and has `app.json` at its root. It contains the packaged app and MIT license, with a source-commit link back to the Kiro specifications and development history. Before submission, verify a fresh native Crew install from that repository and record its Detective run; the existing native evidence predates this publication. See the [submission checklist](README.md).
 
 Deadline: **December 4, 2026, 2 p.m. PST / 5 p.m. EST**. Supply a **public YouTube demo under three minutes**. Best Demo consideration is automatic. Check the [official rules](https://kiroween.devpost.com/rules) before submission.

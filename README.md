@@ -28,6 +28,8 @@ Complete. All 10 tasks of the `metric-investigation` spec and all 5 tasks of the
 
 ## Run it in Kiro Crew
 
+Published copy for installation: https://github.com/manjaria007/causelens-crew-app.
+
 With Kiro Crew installed (`kirocrew setup` and `kirocrew doctor` pass):
 
 ```bash
@@ -37,6 +39,8 @@ kirocrew app enable causelens
 
 Or add this repository's `app-registry.json` as an app registry and install CauseLens from Apps → Discover.
 Then open the CauseLens page, pick the Detective, and ask: "Why did checkout conversion fall?"
+The registry points to the standalone copy; local installation above uses the development copy. See
+[switching an existing install](docs/crew-standalone-install.md) before changing its source.
 
 ## Use the MCP server in Kiro
 

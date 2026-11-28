@@ -1,9 +1,7 @@
 [
   {
     "name": "causelens",
-    "gitUrl": "https://github.com/manjaria007/causelens",
-    "repo": "https://github.com/manjaria007/causelens",
-    "branch": "main",
-    "subdirectory": "crew/causelens"
+    "gitUrl": "https://github.com/manjaria007/causelens-crew-app",
+    "branch": "main"
   }
 ]

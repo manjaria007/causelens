@@ -6,6 +6,7 @@ Drafts for the owner's review; no Devpost entry, video upload or bonus eligibili
 |---|---|---|
 | Public reference console | https://manjaria007.github.io/causelens/demo/ | Owner confirmed it opens on November 25, 2026; static reference investigation |
 | Source code | https://github.com/manjaria007/causelens | Implementation and Crew evidence merged in `d57e4b7` |
+| Standalone Crew app | https://github.com/manjaria007/causelens-crew-app | Published installation copy; fresh Mac install and Detective run pending |
 | Devpost description and Crew bonus text | [devpost-draft.md](devpost-draft.md) | Draft for review |
 | Kiro usage write-up | [kiro-writeup.md](kiro-writeup.md) | Draft for review |
 | Video script and Mac recording instructions | [video-script.md](video-script.md) | 2:48 outline; recording and public upload pending |
@@ -21,18 +22,16 @@ The deadline is **December 4, 2026, 2:00 PM PST / 5:00 PM EST**. Aim to submit b
 - [ ] Add the repository and working-demo URLs. Keep the demo's static-reference label clear.
 - [ ] Record and review the video, keep it under three minutes, publish it publicly on YouTube, and add its URL.
 - [ ] Paste the Kiro usage write-up and the Crew app features/repository link.
-- [ ] Resolve the Crew-bonus repository wording below. Best Demo has no additional entry steps; eligible submissions are considered automatically.
+- [ ] Verify the standalone Crew install below, then use its repository URL in the Crew bonus field. Best Demo has no additional entry steps; eligible submissions are considered automatically.
 - [ ] Save and submit the Devpost form, then verify its submitted status and public links.
 
-## Crew bonus: repository wording to clarify
+## Crew bonus: standalone installation repository
 
-The entry requirements ask for an app GitHub URL and feature description. The prize table also uses the phrase **"separate repo submission"** and says the GitHub account must match the overall submission. The current app is in a subdirectory of the main repository; do not assert that this automatically meets every bonus condition.
+The prize table uses **"separate repo submission"** and says the GitHub account must match the overall submission. To cover that reading, the app is now published separately at https://github.com/manjaria007/causelens-crew-app, under the same owner as the main project. It contains `app.json` at the root, the MIT license, packaged runtime/data/UI and installation instructions. `SOURCE.json` pins the source commit and app subtree; development history and Kiro specs remain in the main project.
 
-Owner-ready question for the organizers, not posted:
+The root registry points directly to that repository's `main` and has no `subdirectory` field. The source app remains in `crew/causelens/`; no implementation was moved or deleted. This publication avoids depending on a subdirectory interpretation, but does not claim organizer approval or eligibility on every other condition.
 
-> My project repository is `manjaria007/causelens`, and its self-contained Crew app is in `crew/causelens/`, with `app.json` and install instructions. Does that subdirectory URL satisfy the Best Kiro Crew App bonus, or must the app be in a distinct repository under the same account?
-
-If a distinct repository is needed, the app package is already self-contained. Publish a copy under the same account with the MIT license, runtime/data/assets, install instructions and a link back to the original development history; verify its installation before using that new URL. No separate repository has been created by this documentation task.
+The standalone package passed manifest, agent, file-identity and MCP subprocess checks. A new install from this repository and a native Detective run on the Mac are still pending; the earlier native Crew evidence comes from the original source. Follow [the switch and verification instructions](../crew-standalone-install.md), record actual results, then use the separate URL in the bonus field. No organizer response is needed to proceed with that check.
 
 ## Final evidence and remaining owner work
 
